@@ -1,0 +1,28 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="brand" href="/labs">Labwiz</a>
+      {{with .User}}
+      <div class="user">
+        <span class="user__name">{{.Name}}</span>
+        <form method="post" action="/logout">
+          <button type="submit" class="button button--secondary">Sign out</button>
+        </form>
+      </div>
+      {{end}}
+    </div>
+  </header>
+  <main class="page">
+    {{template "content" .}}
+  </main>
+</body>
+</html>
+{{end}}

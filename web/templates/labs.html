@@ -1,0 +1,6 @@
+{{define "content"}}
+<h1>Labs available today</h1>
+<ul class="lab-list">
+  {{range .Labs}}<li class="lab-list__item">{{.Title}}</li>{{end}}
+</ul>
+{{end}}
