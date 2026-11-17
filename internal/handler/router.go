@@ -17,7 +17,9 @@ type Deps struct {
 	Auth          *service.Auth
 	Labs          *service.Labs
 	SecureCookies bool
-	Log           *slog.Logger
+	// CSRF makes and checks the token on every form that changes something (Slice 3e).
+	CSRF auth.CSRF
+	Log  *slog.Logger
 }
 
 type handler struct {

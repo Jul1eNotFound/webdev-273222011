@@ -32,6 +32,10 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	csrf, err := auth.NewCSRF(cfg.SessionSecret)
+	if err != nil {
+		return err
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
@@ -49,6 +53,7 @@ func run(log *slog.Logger) error {
 		Auth:          service.NewAuth(st, auth.Bcrypt{}, time.Now),
 		Labs:          service.NewLabs(st, time.Now, time.Local),
 		SecureCookies: cfg.SecureCookies(),
+		CSRF:          csrf,
 		Log:           log,
 	})
 	if err != nil {
