@@ -82,7 +82,7 @@ A staff member adds a lab (`POST /staff/labs/new`):
 
 Slice 3a removed the earlier mismatch: `internal/handler/staff.go` used to call `service.RequireStaff` itself. The GET handler now asks `Labs.NewLabForm(caller)`, and `addLab` leaves the role check to `Labs.Add`, so HTTP and MCP refuse a student at the same point.
 
-This section describes the code as it is after Slice 3b. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row.
+This section describes the code as it is after Slice 3c. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row. Cancelling a session (`Labs.CancelSession` → `CancelSession` in `internal/store/cancel_delete.go`) takes the same lock, so no booking gets in after a cancel. Deleting a lab is one `DELETE`: its sessions cascade, and the `ON DELETE RESTRICT` key on `bookings.session_id` from `000004_lab_sessions` refuses a lab that has any booking. The database decides, not a prior lookup, so a booking made while the delete runs is never lost.
 
 ## Decisions
 How the criteria are written:
@@ -272,6 +272,13 @@ The pages:
 | AC-72 | `TestAC72_DB_AnotherStaffMemberCannotAddSessions`, `TestAC72_OnlyTheOwnerMayAddSessions`, `TestAddSessionIsForTheLabsOwnerOnly_AC72` |
 | AC-83 | `TestAC83_DB_StartedSessionIsRefusedAndCreatesNoRow`, `TestAC83_StartedSessionShowsClosedAndRefusesABooking`, `TestBookSessionThatStartedIsRefused_AC83`, `TestListTodayMarksStartedSessions_AC83` |
 | AC-84 | `TestAC84_DB_SessionTomorrowCanBeBooked`, `TestAC84_SessionTomorrowCanBeBooked`, `TestBookSessionTomorrowSucceeds_AC84` |
+| AC-73 | `TestAC73_DB_CancelSessionKeepsItsBookings`, `TestAC73_DB_CancelThroughTheAppKeepsTheBookings`, `TestAC73_OwnerCancelsASessionAndStudentsSeeItCancelled`, `TestCancelSessionKeepsItsBookings_AC73`, `TestDemoHasACancelledSessionThatKeptItsBooking_AC73` |
+| AC-74 | `TestAC74_BookingACancelledSessionIs409`, `TestAC74_DB_BookingThatWaitedForACancelIsRefused`, `TestBookCancelledSessionIsRefused_AC74` |
+| AC-75 | `TestAC75_CancellingAStartedSessionIs409`, `TestAC75_DB_StartedSessionCannotBeCancelled`, `TestCancelRefusals_AC75`, `TestStaffPageSaysWhatMayBeCancelledOrDeleted_AC75_AC77` |
+| AC-76 | `TestAC76_CancelPageNamesTheSessionAndChangesNothing`, `TestAC76_DeletePageNamesTheLabAndChangesNothing`, `TestCancelPageNamesTheSessionAndChangesNothing_AC76` |
+| AC-77 | `TestAC77_DB_DeleteAnUnbookedLabAndRefuseABookedOne`, `TestAC77_DB_DeleteLabRemovesItAndItsSessions`, `TestAC77_DB_DeleteLabWithAnyBookingIsRefused`, `TestAC77_DeletingABookedLabIs409`, `TestAC77_OwnerDeletesALabNobodyBooked`, `TestDeleteLabNobodyBooked_AC77`, `TestDeleteLabWithBookingsIsRefused_AC77`, `TestStaffPageSaysWhatMayBeCancelledOrDeleted_AC75_AC77` |
+| AC-78 | `TestAC78_DB_BookingAfterTheLabWasDeletedIsNotFound`, `TestAC78_DB_DeleteAndBookAtTheSameTimeNeverLoseABooking`, `TestAC78_DB_DeleteWhileABookingHoldsTheLockIsRefused` |
+| AC-79 | `TestAC79_DB_AnotherStaffMemberCannotCancelOrDelete`, `TestAC79_OnlyTheOwnerMayCancelOrDelete`, `TestCancelIsForTheLabsOwnerOnly_AC79`, `TestDeleteIsForTheLabsOwnerOnly_AC79` |
 
 ## Spec vs result
 <!-- After the agent builds the slice: which criteria passed, which it missed or reinterpreted, and what you changed in this spec because of it. -->
@@ -400,3 +407,29 @@ What changed in this spec because of it:
 - AC-83 and AC-84 moved from Slice 3d to 3b; 3d is only browsing by date.
 - The UI line for the add-session form, AC-12, AC-14 and AC-67 match what was built.
 - The Architecture section traces adding a session and booking a session.
+
+### Slice 3c (checked 2026-11-17)
+Checked with `go test ./...` against the in-memory store and a real `labwiz_test` database (no test skipped), `go test -race` on the cancel, delete and booking tests, by breaking the booking lock, the `RESTRICT` key and the cancelled Book button on purpose, by re-seeding the development database, and by reading the code. Service coverage stays at 100%.
+
+| Criterion | Result | Notes |
+| --- | --- | --- |
+| AC-73 | Passed | `cancelled_at` is set and the bookings stay; `/labs` and `/labs/{id}` show "Cancelled" with no Book form, and the owner's page keeps the "Booked by" table. Making the template show the Book button again made the test fail. |
+| AC-74 | Passed | Refused in the booking check, before "already booked". A store test holds the cancel's lock while a booking waits: the booking then sees the session cancelled. Without `FOR UPDATE OF s` in `BookSession` that test failed 2 of 2. |
+| AC-75 | Passed | Also refused on the confirmation page, so it never offers a cancel the POST would refuse; the staff page shows no Cancel link on a started or cancelled session. |
+| AC-76 | Passed | One template for both pages; a GET changes nothing; "Keep it" goes back to the lab's staff page. |
+| AC-77 | Passed | Deleting removes the lab and its sessions; any booking (past, upcoming or on a cancelled session) refuses it. With the key changed to `ON DELETE CASCADE` on the test database, the delete tests failed: the bookings were deleted with the lab. |
+| AC-78 | Passed, with a limit | Both orders are forced deterministically in store tests: a booking holding the lock makes the delete fail with 409 and stays; a booking after the delete gets 404. The 20-round race through the service never lost a booking, but the booking won every round, because the delete looks the lab up first, so that test alone does not show the "delete first" outcome. |
+| AC-79 | Passed | Owner only for both pages and both actions; a student is refused before the lookup. |
+| AC-29, AC-41 | Untested by hand | The confirmation pages and the staff page's links at 375 px and by keyboard. The pages have no inputs, only a button and a link. |
+| AC-30, AC-42 | Passed | The two new pages have their own titles, "Cancel a session · Labwiz" and "Delete a lab · Labwiz". |
+
+Decisions taken while building it:
+- A cancelled session shows "Cancelled" instead of the Book form, not a disabled button: there is nothing to book.
+- The confirmation pages are plain forms. SPEC's "a script may turn it into a dialog" is left for later.
+- A `RESTRICT` key reports SQLSTATE `23001`, not `23503` as planned; the store maps both to `ErrInUse`. The first test run showed the raw database error.
+
+What went wrong:
+- `EnsureSession`, written in Slice 3b, relied on the overlap constraint to find an existing session. The constraint ignores cancelled sessions, so once the demo cancelled a session, a second seed run made a live copy of it and booked it again. The demo seed test caught it (bookings 11 → 12 on the second run). `EnsureSession` now looks for an identical session first, cancelled or not; its store test and a demo test that seeds twice cover it.
+
+What changed in this spec because of it:
+- The Architecture section says how cancelling and deleting keep bookings safe.
