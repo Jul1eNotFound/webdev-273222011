@@ -68,6 +68,7 @@ func New(d Deps) (http.Handler, error) {
 		r.Use(mw.RequirePage)
 		r.Get("/labs", h.labsPage)
 		r.Get("/labs/{id}", h.labPage)
+		r.Get("/staff/labs", h.myLabsPage)
 		r.Get("/staff/labs/new", h.newLabForm)
 		r.Post("/staff/labs/new", h.addLab)
 		r.Get("/staff/labs/{id}", h.staffLabPage)

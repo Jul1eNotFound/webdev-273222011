@@ -14,9 +14,20 @@ import (
 
 const newLabTitle = "Add a lab · Labwiz"
 
+// myLabsPage lists the labs the signed-in staff member owns (AC-62, AC-63).
+func (h *handler) myLabsPage(w http.ResponseWriter, r *http.Request) {
+	c, _ := auth.CallerFrom(r.Context())
+	labs, err := h.Labs.MyLabs(r.Context(), c)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.page(w, http.StatusOK, "my_labs", pageData{Title: "My labs · Labwiz", User: &c, Labs: labs})
+}
+
 func (h *handler) newLabForm(w http.ResponseWriter, r *http.Request) {
 	c, _ := auth.CallerFrom(r.Context())
-	if err := service.RequireStaff(c); err != nil {
+	if err := h.Labs.NewLabForm(c); err != nil {
 		h.fail(w, r, err)
 		return
 	}
@@ -25,11 +36,7 @@ func (h *handler) newLabForm(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) addLab(w http.ResponseWriter, r *http.Request) {
 	c, _ := auth.CallerFrom(r.Context())
-	// A student gets 403 before their form is even read (AC-15).
-	if err := service.RequireStaff(c); err != nil {
-		h.fail(w, r, err)
-		return
-	}
+	// No role check here: Labs.Add refuses students with 403 (AC-15), as it does for MCP.
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := r.ParseForm(); err != nil {
 		h.errorPage(w, r, http.StatusBadRequest, "The lab form could not be read. Please try again.")

@@ -1,0 +1,17 @@
+{{define "content"}}
+<h1>My labs</h1>
+{{if .Labs}}
+<ul class="lab-list">
+  {{range .Labs}}
+  <li class="lab-list__item">
+    <h2 class="lab-card__title"><a href="/staff/labs/{{.ID}}">{{.Title}}</a></h2>
+    <p class="lab-meta"><span class="lab-card__period">{{period .StartsAt .EndsAt}}</span> · {{.Booked}} of {{.PlaceLimit}} places booked</p>
+  </li>
+  {{end}}
+</ul>
+{{else}}
+<p class="empty">You have no labs yet.</p>
+{{end}}
+<p><a class="button" href="/staff/labs/new">Add a lab</a></p>
+<p><a href="/labs">Back to the lab list</a></p>
+{{end}}

@@ -38,7 +38,7 @@ type renderer struct {
 func newRenderer(loc *time.Location) (*renderer, error) {
 	rn := &renderer{pages: map[string]*template.Template{}}
 	funcs := template.FuncMap{"period": period(loc)}
-	for _, name := range []string{"login", "labs", "lab", "error", "lab_new", "lab_staff"} {
+	for _, name := range []string{"login", "labs", "lab", "error", "my_labs", "lab_new", "lab_staff"} {
 		t, err := template.New(name).Funcs(funcs).ParseFS(web.FS, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err
