@@ -33,7 +33,7 @@ func newStaffApp(t *testing.T) (string, *servicetest.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.AddUser(store.User{ID: 2, Email: staffEmail, Name: "Stella Staff", PasswordHash: string(hash), Role: "staff"})
+	st.AddUser(store.User{ID: stellaID, Email: staffEmail, Name: "Stella Staff", PasswordHash: string(hash), Role: "staff"})
 	st.Bookers[1] = []store.Booker{{Name: "Ana Example", Email: "ana@labwiz.test"}, {Name: "Ben Example", Email: "ben@labwiz.test"}}
 	st.Bookers[2] = []store.Booker{{Name: "Cleo Example", Email: "cleo@labwiz.test"}}
 	return base, st

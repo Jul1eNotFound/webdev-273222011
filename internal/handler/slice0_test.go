@@ -20,6 +20,9 @@ const (
 	studentPass  = "right-password"
 )
 
+// stellaID is the staff member who owns the fake labs. newStaffApp adds her account.
+const stellaID = 2
+
 // newFakeApp serves the app over the in-memory store: one student, labs today and tomorrow.
 func newFakeApp(t *testing.T) (string, *servicetest.Store) {
 	t.Helper()
@@ -31,9 +34,9 @@ func newFakeApp(t *testing.T) (string, *servicetest.Store) {
 	st.AddUser(store.User{ID: 1, Email: studentEmail, Name: "Sam Student", PasswordHash: string(hash), Role: "student"})
 	day := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
 	st.Labs = []store.Lab{
-		{ID: 1, Title: "Chemistry basics", StartsAt: day.Add(9 * time.Hour), EndsAt: day.Add(12 * time.Hour), PlaceLimit: 10},
-		{ID: 2, Title: "Circuits workshop", StartsAt: day.Add(13 * time.Hour), EndsAt: day.Add(17 * time.Hour), PlaceLimit: 2},
-		{ID: 3, Title: "Robotics intro", StartsAt: day.Add(33 * time.Hour), EndsAt: day.Add(36 * time.Hour), PlaceLimit: 8},
+		{ID: 1, Title: "Chemistry basics", StartsAt: day.Add(9 * time.Hour), EndsAt: day.Add(12 * time.Hour), PlaceLimit: 10, OwnerID: stellaID},
+		{ID: 2, Title: "Circuits workshop", StartsAt: day.Add(13 * time.Hour), EndsAt: day.Add(17 * time.Hour), PlaceLimit: 2, OwnerID: stellaID},
+		{ID: 3, Title: "Robotics intro", StartsAt: day.Add(33 * time.Hour), EndsAt: day.Add(36 * time.Hour), PlaceLimit: 8, OwnerID: stellaID},
 	}
 	return newServer(t, st, st).URL, st
 }

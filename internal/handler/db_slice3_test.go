@@ -138,6 +138,7 @@ func TestAC6_DB_ConcurrentBookingsOfTheLastPlaceLetExactlyOneThrough(t *testing.
 	day := time.Date(fixedNow.Year(), fixedNow.Month(), fixedNow.Day(), 0, 0, 0, 0, time.UTC)
 	lab, err := st.CreateLab(ctx, store.Lab{
 		Title: "Last place", StartsAt: day.Add(14 * time.Hour), EndsAt: day.Add(16 * time.Hour), PlaceLimit: 1,
+		OwnerID: userIDOf(t, st, seed.StaffEmail),
 	})
 	if err != nil {
 		t.Fatal(err)

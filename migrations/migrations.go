@@ -24,6 +24,11 @@ func Down(databaseURL string) error {
 	return run(databaseURL, (*migrate.Migrate).Down)
 }
 
+// To migrates up or down to the given version. Tests use it to start from an older schema.
+func To(databaseURL string, version uint) error {
+	return run(databaseURL, func(m *migrate.Migrate) error { return m.Migrate(version) })
+}
+
 func run(databaseURL string, step func(*migrate.Migrate) error) error {
 	src, err := iofs.New(files, ".")
 	if err != nil {

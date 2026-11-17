@@ -42,6 +42,18 @@ func RequireStaff(c Caller) error {
 	return nil
 }
 
+// RequireOwner allows the staff member who owns the lab only (AC-64). Every action that manages one
+// lab (its booking list, and from Slice 3b its sessions) runs it after looking the lab up.
+func RequireOwner(c Caller, lab store.Lab) error {
+	if err := RequireStaff(c); err != nil {
+		return err
+	}
+	if lab.OwnerID != c.ID {
+		return ErrForbidden
+	}
+	return nil
+}
+
 // RequireStudent allows signed-in students only, so staff cannot book (AC-46).
 func RequireStudent(c Caller) error {
 	if c.ID == 0 {

@@ -36,8 +36,14 @@ func DemoAccounts() []Account {
 
 type demoLab struct {
 	lab     store.Lab
+	owner   string   // email of the demo staff member who owns it
 	bookers []string // emails of the demo students who booked it
 }
+
+const (
+	dana = "dana@labwiz.test"
+	omar = "omar@labwiz.test"
+)
 
 // demoLabs covers the cases worth seeing by hand: free, nearly full and full labs today, one that
 // runs past midnight, labs on later days, and one that is already over.
@@ -45,24 +51,24 @@ func demoLabs(now time.Time, loc *time.Location) []demoLab {
 	t := now.In(loc)
 	today := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
 	at := func(day, hour int) time.Time { return today.AddDate(0, 0, day).Add(time.Duration(hour) * time.Hour) }
-	lab := func(title, desc string, from, to time.Time, limit int, bookers ...string) demoLab {
-		return demoLab{store.Lab{Title: title, Description: desc, StartsAt: from, EndsAt: to, PlaceLimit: limit}, bookers}
+	lab := func(owner, title, desc string, from, to time.Time, limit int, bookers ...string) demoLab {
+		return demoLab{store.Lab{Title: title, Description: desc, StartsAt: from, EndsAt: to, PlaceLimit: limit}, owner, bookers}
 	}
 	return []demoLab{
-		lab("Pendulum timing", "Measure g with a pendulum and a stopwatch.", at(0, 10), at(0, 12), 6,
+		lab(dana, "Pendulum timing", "Measure g with a pendulum and a stopwatch.", at(0, 10), at(0, 12), 6,
 			"ana@labwiz.test"),
-		lab("Biology dissection", "Plant and flower dissection under the stereo microscope.", at(0, 14), at(0, 16), 3,
+		lab(dana, "Biology dissection", "Plant and flower dissection under the stereo microscope.", at(0, 14), at(0, 16), 3,
 			"ana@labwiz.test", "ben@labwiz.test", "chen@labwiz.test"), // full
-		lab("3D printing basics", "Slice a model and print it in PLA.", at(0, 15), at(0, 18), 4,
+		lab(omar, "3D printing basics", "Slice a model and print it in PLA.", at(0, 15), at(0, 18), 4,
 			"diego@labwiz.test", "eva@labwiz.test", "farah@labwiz.test"), // one place left
-		lab("Evening astronomy", "Telescope session on the roof, weather permitting.", at(0, 21), at(1, 1), 12,
+		lab(dana, "Evening astronomy", "Telescope session on the roof, weather permitting.", at(0, 21), at(1, 1), 12,
 			"ben@labwiz.test", "eva@labwiz.test"), // runs past midnight
-		lab("Soldering practice", "Solder a small LED kit. Safety glasses provided.", at(1, 9), at(1, 11), 5,
+		lab(omar, "Soldering practice", "Solder a small LED kit. Safety glasses provided.", at(1, 9), at(1, 11), 5,
 			"chen@labwiz.test"),
-		lab("Spectroscopy", "Identify gases from their emission lines.", at(1, 13), at(1, 15), 4),
-		lab("Organic chemistry", "Synthesis of aspirin.", at(2, 10), at(2, 13), 8),
-		lab("Machine learning lab", "Train a small image classifier on the lab GPUs.", at(7, 14), at(7, 17), 20),
-		lab("Water quality testing", "Test river samples for pH and nitrates.", at(-1, 9), at(-1, 12), 6,
+		lab(dana, "Spectroscopy", "Identify gases from their emission lines.", at(1, 13), at(1, 15), 4),
+		lab(dana, "Organic chemistry", "Synthesis of aspirin.", at(2, 10), at(2, 13), 8),
+		lab(omar, "Machine learning lab", "Train a small image classifier on the lab GPUs.", at(7, 14), at(7, 17), 20),
+		lab(dana, "Water quality testing", "Test river samples for pH and nitrates.", at(-1, 9), at(-1, 12), 6,
 			"diego@labwiz.test"), // already over
 	}
 }
@@ -98,6 +104,11 @@ func Demo(ctx context.Context, st *store.Store, now time.Time, loc *time.Locatio
 		return nil
 	}
 	for _, d := range demoLabs(now, loc) {
+		ownerID, ok := ids[d.owner]
+		if !ok {
+			return fmt.Errorf("demo lab %q is owned by unknown account %s", d.lab.Title, d.owner)
+		}
+		d.lab.OwnerID = ownerID
 		labID, err := st.UpsertLab(ctx, d.lab)
 		if err != nil {
 			return err

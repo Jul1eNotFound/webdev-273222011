@@ -16,6 +16,7 @@ type LabStore interface {
 	LabsAvailableBetween(ctx context.Context, from, to time.Time) ([]store.Lab, error)
 	CreateLab(ctx context.Context, l store.Lab) (store.Lab, error)
 	LabByID(ctx context.Context, id int64) (store.Lab, error)
+	LabsOwnedBy(ctx context.Context, ownerID int64) ([]store.Lab, error)
 	LabBookers(ctx context.Context, labID int64) ([]store.Booker, error)
 	BookLab(ctx context.Context, userID, labID int64, check store.BookingCheck) (store.Lab, error)
 }
@@ -132,7 +133,14 @@ func (l *Labs) Book(ctx context.Context, caller Caller, labID int64) (LabCard, e
 	return LabCard{}, fmt.Errorf("book lab: %w", err)
 }
 
-// Add creates a lab. Staff only (AC-15); the place limit must be 1 or more (AC-13) and the title unused (AC-2).
+// NewLabForm allows the empty add-lab form to staff only (AC-15). The handler asks here instead of
+// checking the role itself, so every role check stays in the service.
+func (l *Labs) NewLabForm(caller Caller) error {
+	return RequireStaff(caller)
+}
+
+// Add creates a lab owned by the caller (AC-60). Staff only (AC-15); the place limit must be 1 or more
+// (AC-13) and the title unused (AC-2).
 func (l *Labs) Add(ctx context.Context, caller Caller, in NewLab) (store.Lab, error) {
 	if err := RequireStaff(caller); err != nil {
 		return store.Lab{}, err
@@ -141,6 +149,7 @@ func (l *Labs) Add(ctx context.Context, caller Caller, in NewLab) (store.Lab, er
 	if err != nil {
 		return store.Lab{}, err
 	}
+	lab.OwnerID = caller.ID
 	// The unique constraint decides, so two staff adding the same title at once cannot both succeed.
 	lab, err = l.store.CreateLab(ctx, lab)
 	if errors.Is(err, store.ErrDuplicate) {
@@ -182,8 +191,24 @@ func (l *Labs) parse(in NewLab) (store.Lab, error) {
 	}, nil
 }
 
-// Bookings returns a lab and the students who booked it (AC-14). Staff only, checked before the
-// lookup, so a student cannot even learn whether a lab id exists (AC-45).
+// MyLabs returns the labs the calling staff member owns, each with its free places (AC-62).
+func (l *Labs) MyLabs(ctx context.Context, caller Caller) ([]LabCard, error) {
+	if err := RequireStaff(caller); err != nil {
+		return nil, err
+	}
+	labs, err := l.store.LabsOwnedBy(ctx, caller.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list own labs: %w", err)
+	}
+	cards := make([]LabCard, len(labs))
+	for i, lab := range labs {
+		cards[i] = LabCard{Lab: lab, FreePlaces: freePlaces(lab)}
+	}
+	return cards, nil
+}
+
+// Bookings returns a lab and the students who booked it, to the lab's owner only (AC-14, AC-64).
+// The role is checked before the lookup, so a student cannot even learn whether a lab id exists (AC-45).
 func (l *Labs) Bookings(ctx context.Context, caller Caller, id int64) (store.Lab, []store.Booker, error) {
 	if err := RequireStaff(caller); err != nil {
 		return store.Lab{}, nil, err
@@ -194,6 +219,9 @@ func (l *Labs) Bookings(ctx context.Context, caller Caller, id int64) (store.Lab
 	}
 	if err != nil {
 		return store.Lab{}, nil, fmt.Errorf("look up lab: %w", err)
+	}
+	if err := RequireOwner(caller, lab); err != nil {
+		return store.Lab{}, nil, err
 	}
 	bookers, err := l.store.LabBookers(ctx, id)
 	if err != nil {

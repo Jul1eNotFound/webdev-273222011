@@ -64,6 +64,20 @@ func TestDemoSeedsAccountsLabsAndBookingsOnce(t *testing.T) {
 	}
 }
 
+func TestDemoLabsAreOwnedByStaffFromThreeAccounts_AC60(t *testing.T) {
+	pool := storetest.Open(t)
+	seedAll(t, store.New(pool))
+	var owners, notStaff int
+	if err := pool.QueryRow(context.Background(), `
+		SELECT count(DISTINCT l.owner_id), count(*) FILTER (WHERE u.role <> 'staff')
+		FROM labs l JOIN users u ON u.id = l.owner_id`).Scan(&owners, &notStaff); err != nil {
+		t.Fatal(err)
+	}
+	if owners < 3 || notStaff != 0 {
+		t.Errorf("labs have %d owners (want at least 3), %d of them owned by non-staff (want 0)", owners, notStaff)
+	}
+}
+
 func TestDemoGivesAFullLabAndALabPastMidnightToday(t *testing.T) {
 	pool := storetest.Open(t)
 	st := store.New(pool)

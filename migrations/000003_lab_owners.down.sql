@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS labs_owner_id_idx;
+ALTER TABLE labs DROP COLUMN IF EXISTS owner_id;

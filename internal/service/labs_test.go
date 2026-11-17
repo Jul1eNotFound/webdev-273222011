@@ -100,6 +100,7 @@ func TestAddLabCreatesOneLab_AC12(t *testing.T) {
 	want := store.Lab{
 		ID: 5, Title: "Optics", Description: "Lenses and lasers.",
 		StartsAt: time.Date(2026, 10, 23, 9, 0, 0, 0, loc), EndsAt: time.Date(2026, 10, 23, 11, 30, 0, 0, loc), PlaceLimit: 12,
+		OwnerID: staff.ID, // AC-60
 	}
 	if lab != want {
 		t.Fatalf("lab = %+v, want %+v", lab, want)
@@ -216,7 +217,7 @@ func TestAddLabStoreError(t *testing.T) {
 
 func TestLabBookingsListsExactlyTheBookers_AC14(t *testing.T) {
 	st := servicetest.NewStore()
-	st.Labs = []store.Lab{{ID: 1, Title: "Optics"}, {ID: 2, Title: "Circuits"}}
+	st.Labs = []store.Lab{{ID: 1, Title: "Optics", OwnerID: staff.ID}, {ID: 2, Title: "Circuits", OwnerID: staff.ID}}
 	st.Bookers[1] = []store.Booker{{Name: "Ana", Email: "ana@labwiz.test"}, {Name: "Ben", Email: "ben@labwiz.test"}}
 	st.Bookers[2] = []store.Booker{{Name: "Cleo", Email: "cleo@labwiz.test"}}
 
@@ -254,7 +255,7 @@ func TestLabBookingsUnknownLabIsNotFound(t *testing.T) {
 
 func TestLabBookingsStoreErrors(t *testing.T) {
 	st := servicetest.NewStore()
-	st.Labs = []store.Lab{{ID: 1, Title: "Optics"}}
+	st.Labs = []store.Lab{{ID: 1, Title: "Optics", OwnerID: staff.ID}}
 	l := service.NewLabs(st, clock, time.UTC)
 
 	st.ErrLabByID = errDB

@@ -20,7 +20,8 @@ type Passwords struct {
 	Staff   string
 }
 
-// Run seeds one student, one staff member, three labs available today and one that starts tomorrow.
+// Run seeds one student, one staff member, and four labs that the staff member owns: three available
+// today and one that starts tomorrow.
 func Run(ctx context.Context, st *store.Store, now time.Time, loc *time.Location, pw Passwords) error {
 	if pw.Student == "" || pw.Staff == "" {
 		return errors.New("both seed passwords must be set")
@@ -38,6 +39,10 @@ func Run(ctx context.Context, st *store.Store, now time.Time, loc *time.Location
 			return err
 		}
 	}
+	owner, err := st.UserByEmail(ctx, StaffEmail)
+	if err != nil {
+		return err
+	}
 
 	t := now.In(loc)
 	today := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
@@ -49,6 +54,7 @@ func Run(ctx context.Context, st *store.Store, now time.Time, loc *time.Location
 		{Title: "Robotics intro", Description: "Program a line-following robot.", StartsAt: at(1, 9), EndsAt: at(1, 12), PlaceLimit: 8},
 	}
 	for _, l := range labs {
+		l.OwnerID = owner.ID
 		if _, err := st.UpsertLab(ctx, l); err != nil {
 			return err
 		}

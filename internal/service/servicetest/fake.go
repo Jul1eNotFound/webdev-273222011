@@ -25,7 +25,7 @@ type Store struct {
 	Bookers map[int64][]store.Booker
 
 	ErrUserByEmail, ErrCreateSession, ErrSessionUser, ErrDeleteSession, ErrLabs error
-	ErrCreateLab, ErrLabByID, ErrLabBookers, ErrBookLab                         error
+	ErrCreateLab, ErrLabByID, ErrLabBookers, ErrBookLab, ErrLabsOwnedBy         error
 
 	// booked holds the (user id, lab id) pairs booked through BookLab, like the unique constraint on bookings.
 	booked map[[2]int64]bool
@@ -122,8 +122,34 @@ func (s *Store) LabsAvailableBetween(_ context.Context, from, to time.Time) ([]s
 	var out []store.Lab
 	for _, l := range s.Labs {
 		if l.StartsAt.Before(to) && l.EndsAt.After(from) {
-			l.Booked = len(s.Bookers[l.ID])
-			out = append(out, l)
+			out = append(out, s.shown(l))
+		}
+	}
+	return out, nil
+}
+
+// shown fills in what the real queries join or count: the owner's name and the number of bookings.
+// The caller holds the mutex.
+func (s *Store) shown(l store.Lab) store.Lab {
+	l.Booked = len(s.Bookers[l.ID])
+	for _, u := range s.users {
+		if u.ID == l.OwnerID {
+			l.OwnerName = u.Name
+		}
+	}
+	return l
+}
+
+func (s *Store) LabsOwnedBy(_ context.Context, ownerID int64) ([]store.Lab, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrLabsOwnedBy != nil {
+		return nil, s.ErrLabsOwnedBy
+	}
+	var out []store.Lab
+	for _, l := range s.Labs {
+		if l.OwnerID == ownerID {
+			out = append(out, s.shown(l))
 		}
 	}
 	return out, nil
@@ -156,8 +182,7 @@ func (s *Store) LabByID(_ context.Context, id int64) (store.Lab, error) {
 	}
 	for _, l := range s.Labs {
 		if l.ID == id {
-			l.Booked = len(s.Bookers[id])
-			return l, nil
+			return s.shown(l), nil
 		}
 	}
 	return store.Lab{}, store.ErrNotFound

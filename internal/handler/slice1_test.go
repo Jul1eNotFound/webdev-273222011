@@ -15,7 +15,7 @@ func TestAC10_LabCardsShowTitleDescriptionPeriodAndFreePlaces(t *testing.T) {
 	st.Labs[0].Description = "Titration and safe handling of reagents."
 	st.Labs = append(st.Labs, store.Lab{
 		ID: 4, Title: "Night shift", Description: "Runs past midnight.",
-		StartsAt: day.Add(22 * time.Hour), EndsAt: day.Add(26 * time.Hour), PlaceLimit: 3,
+		StartsAt: day.Add(22 * time.Hour), EndsAt: day.Add(26 * time.Hour), PlaceLimit: 3, OwnerID: stellaID,
 	})
 	st.Bookers[1] = []store.Booker{{Name: "Ana Example"}, {Name: "Ben Example"}, {Name: "Cleo Example"}}
 	st.Bookers[2] = []store.Booker{{Name: "Ana Example"}, {Name: "Ben Example"}}

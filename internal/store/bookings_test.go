@@ -14,6 +14,20 @@ import (
 
 var errFull = errors.New("full")
 
+// staffID creates a staff account to own test labs, which must have an owner (AC-60).
+func staffID(t *testing.T, st *store.Store) int64 {
+	t.Helper()
+	ctx := context.Background()
+	if err := st.UpsertUser(ctx, store.User{Email: "owner@labwiz.test", Name: "Owner", PasswordHash: "unused", Role: "staff"}); err != nil {
+		t.Fatal(err)
+	}
+	u, err := st.UserByEmail(ctx, "owner@labwiz.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u.ID
+}
+
 // TestAC6_DB_BookLabHoldsTheLabLockWhileTheCheckRuns makes the gap between counting and inserting wide
 // on purpose: every check sleeps before deciding. Without the row lock all of them would count 0 and
 // all would insert. With it, they run one at a time and only the first fits.
@@ -22,7 +36,7 @@ func TestAC6_DB_BookLabHoldsTheLabLockWhileTheCheckRuns(t *testing.T) {
 	st := store.New(pool)
 	ctx := context.Background()
 	now := time.Now()
-	lab, err := st.CreateLab(ctx, store.Lab{Title: "Last place", StartsAt: now, EndsAt: now.Add(time.Hour), PlaceLimit: 1})
+	lab, err := st.CreateLab(ctx, store.Lab{Title: "Last place", StartsAt: now, EndsAt: now.Add(time.Hour), PlaceLimit: 1, OwnerID: staffID(t, st)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +109,7 @@ func TestBookLabReportsAMissingLabAndADuplicate_AC47_AC5(t *testing.T) {
 		t.Fatalf("missing lab: err = %v, want ErrNotFound", err)
 	}
 	now := time.Now()
-	lab, err := st.CreateLab(ctx, store.Lab{Title: "Optics", StartsAt: now, EndsAt: now.Add(time.Hour), PlaceLimit: 5})
+	lab, err := st.CreateLab(ctx, store.Lab{Title: "Optics", StartsAt: now, EndsAt: now.Add(time.Hour), PlaceLimit: 5, OwnerID: staffID(t, st)})
 	if err != nil {
 		t.Fatal(err)
 	}
