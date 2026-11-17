@@ -2,10 +2,15 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// pgUniqueViolation is PostgreSQL's SQLSTATE for a broken unique constraint.
+const pgUniqueViolation = "23505"
 
 type Lab struct {
 	ID          int64
@@ -14,6 +19,55 @@ type Lab struct {
 	StartsAt    time.Time
 	EndsAt      time.Time
 	PlaceLimit  int
+}
+
+// Booker is a student who booked a lab.
+type Booker struct {
+	Name  string
+	Email string
+}
+
+// CreateLab inserts a lab and returns it with its id. A title that is already taken gives ErrDuplicate.
+func (s *Store) CreateLab(ctx context.Context, l Lab) (Lab, error) {
+	err := s.db.QueryRow(ctx, `
+		INSERT INTO labs (title, description, starts_at, ends_at, place_limit)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id`,
+		l.Title, l.Description, l.StartsAt, l.EndsAt, l.PlaceLimit).Scan(&l.ID)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+		return Lab{}, ErrDuplicate
+	}
+	if err != nil {
+		return Lab{}, err
+	}
+	return l, nil
+}
+
+func (s *Store) LabByID(ctx context.Context, id int64) (Lab, error) {
+	var l Lab
+	err := s.db.QueryRow(ctx, `
+		SELECT id, title, description, starts_at, ends_at, place_limit
+		FROM labs
+		WHERE id = $1`, id).Scan(&l.ID, &l.Title, &l.Description, &l.StartsAt, &l.EndsAt, &l.PlaceLimit)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Lab{}, ErrNotFound
+	}
+	return l, err
+}
+
+// LabBookers returns the students who booked a lab, ordered by name.
+func (s *Store) LabBookers(ctx context.Context, labID int64) ([]Booker, error) {
+	rows, err := s.db.Query(ctx, `
+		SELECT u.name, u.email
+		FROM bookings b
+		JOIN users u ON u.id = b.user_id
+		WHERE b.lab_id = $1
+		ORDER BY u.name, u.email`, labID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowToStructByPos[Booker])
 }
 
 // LabsAvailableBetween returns labs whose time period overlaps [from, to).

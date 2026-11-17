@@ -7,8 +7,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// ErrNotFound is returned when a lookup matches no row.
-var ErrNotFound = errors.New("not found")
+var (
+	// ErrNotFound is returned when a lookup matches no row.
+	ErrNotFound = errors.New("not found")
+	// ErrDuplicate is returned when an insert breaks a unique constraint.
+	ErrDuplicate = errors.New("duplicate")
+)
 
 type Store struct {
 	db *pgxpool.Pool

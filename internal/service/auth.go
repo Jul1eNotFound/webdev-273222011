@@ -29,6 +29,19 @@ type Caller struct {
 	Role  Role
 }
 
+func (c Caller) IsStaff() bool { return c.Role == RoleStaff }
+
+// RequireStaff allows signed-in staff only. Every staff-only action starts with it.
+func RequireStaff(c Caller) error {
+	if c.ID == 0 {
+		return ErrUnauthenticated
+	}
+	if !c.IsStaff() {
+		return ErrForbidden
+	}
+	return nil
+}
+
 type AuthStore interface {
 	UserByEmail(ctx context.Context, email string) (store.User, error)
 	CreateSession(ctx context.Context, idHash []byte, userID int64, expiresAt time.Time) error

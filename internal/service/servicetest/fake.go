@@ -20,12 +20,22 @@ type Store struct {
 	users    map[string]store.User
 	sessions map[string]session
 	Labs     []store.Lab
+	// Bookers lists, per lab id, the students who booked it.
+	Bookers map[int64][]store.Booker
 
 	ErrUserByEmail, ErrCreateSession, ErrSessionUser, ErrDeleteSession, ErrLabs error
+	ErrCreateLab, ErrLabByID, ErrLabBookers                                     error
 }
 
 func NewStore() *Store {
-	return &Store{users: map[string]store.User{}, sessions: map[string]session{}}
+	return &Store{users: map[string]store.User{}, sessions: map[string]session{}, Bookers: map[int64][]store.Booker{}}
+}
+
+// LabCount returns how many labs are stored, like counting rows in labs.
+func (s *Store) LabCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.Labs)
 }
 
 func (s *Store) AddUser(u store.User) {
@@ -109,4 +119,46 @@ func (s *Store) LabsAvailableBetween(_ context.Context, from, to time.Time) ([]s
 		}
 	}
 	return out, nil
+}
+
+// CreateLab gives a taken title ErrDuplicate, like the unique constraint on labs.title.
+func (s *Store) CreateLab(_ context.Context, l store.Lab) (store.Lab, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrCreateLab != nil {
+		return store.Lab{}, s.ErrCreateLab
+	}
+	var maxID int64
+	for _, existing := range s.Labs {
+		if existing.Title == l.Title {
+			return store.Lab{}, store.ErrDuplicate
+		}
+		maxID = max(maxID, existing.ID)
+	}
+	l.ID = maxID + 1
+	s.Labs = append(s.Labs, l)
+	return l, nil
+}
+
+func (s *Store) LabByID(_ context.Context, id int64) (store.Lab, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrLabByID != nil {
+		return store.Lab{}, s.ErrLabByID
+	}
+	for _, l := range s.Labs {
+		if l.ID == id {
+			return l, nil
+		}
+	}
+	return store.Lab{}, store.ErrNotFound
+}
+
+func (s *Store) LabBookers(_ context.Context, labID int64) ([]store.Booker, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrLabBookers != nil {
+		return nil, s.ErrLabBookers
+	}
+	return s.Bookers[labID], nil
 }

@@ -1,0 +1,21 @@
+{{define "content"}}
+{{with .Success}}<p class="message message--success" role="status">{{.}}</p>{{end}}
+{{$bookers := .Bookers}}
+{{with .Lab}}
+<h1>{{.Title}}</h1>
+<p class="lab-meta">{{period .StartsAt .EndsAt}} · {{len $bookers}} of {{.PlaceLimit}} places booked</p>
+{{with .Description}}<p>{{.}}</p>{{end}}
+{{end}}
+<h2>Booked by</h2>
+{{if .Bookers}}
+<table class="table">
+  <thead><tr><th scope="col">Name</th><th scope="col">Email</th></tr></thead>
+  <tbody>
+    {{range .Bookers}}<tr><td>{{.Name}}</td><td>{{.Email}}</td></tr>{{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="empty">No one has booked this lab yet.</p>
+{{end}}
+<p><a href="/labs">Back to labs</a></p>
+{{end}}

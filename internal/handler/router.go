@@ -26,7 +26,7 @@ type handler struct {
 }
 
 func New(d Deps) (http.Handler, error) {
-	rn, err := newRenderer()
+	rn, err := newRenderer(d.Labs.Location())
 	if err != nil {
 		return nil, err
 	}
@@ -63,6 +63,9 @@ func New(d Deps) (http.Handler, error) {
 	r.Group(func(r chi.Router) {
 		r.Use(mw.RequirePage)
 		r.Get("/labs", h.labsPage)
+		r.Get("/staff/labs/new", h.newLabForm)
+		r.Post("/staff/labs/new", h.addLab)
+		r.Get("/staff/labs/{id}", h.staffLabPage)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(mw.RequireAPI)

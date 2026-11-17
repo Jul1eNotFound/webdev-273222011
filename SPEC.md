@@ -57,8 +57,20 @@ lab booking
 - States, on every screen: loading (static "Loading…" text), empty, error (one readable sentence) and success (a message at the top of the page, no reload needed).
 
 ## Architecture
-<!-- Exercise 3. One request traced through every layer, naming the file for each one,
+<!-- One request traced through every layer, naming the file for each one,
      plus one place where your own code does not match this layering. -->
+Layers: handler → service → store → database. HTTP and MCP both go through the same service.
+
+A staff member adds a lab (`POST /staff/labs/new`):
+1. **Entry**: `cmd/server/main.go` loads config, opens the pool and wires store, services and router together.
+2. **Routing and session**: `internal/handler/router.go` matches the route inside the `RequirePage` group. `internal/auth/session.go` reads the cookie, gets the caller from `service.Auth.CurrentUser` (`internal/service/auth.go`), and puts it in the request context. With no valid session, the visitor is redirected to `/login`.
+3. **Handler**: `addLab` in `internal/handler/staff.go` caps the body size, parses the form into `service.NewLab` and calls `Labs.Add`.
+4. **Service**: `Labs.Add` in `internal/service/labs.go` checks the role (`RequireStaff`, AC-15), validates the title, time period and place limit (AC-13), and maps `store.ErrDuplicate` to `ErrDuplicateTitle` (AC-2). The typed errors are in `internal/service/errors.go`.
+5. **Store**: `CreateLab` in `internal/store/labs.go` runs the only SQL, an `INSERT … RETURNING id`, and turns SQLSTATE `23505` into `ErrDuplicate`.
+6. **Database**: the `labs` table and its unique title come from `migrations/000001_init.up.sql`. The unique constraint, not a prior lookup, decides a duplicate title, so two staff adding the same title at once cannot both succeed.
+7. **Back out**: on success the handler redirects to `/staff/labs/{id}?created=1`. A validation or conflict error re-renders `web/templates/lab_new.html` with the message and the typed values (400/409). Any other error goes through `fail` → `statusFor` in `internal/handler/render.go`, which shows one readable sentence (AC-43).
+
+**Where the code does not match the layering:** `newLabForm` and `addLab` in `internal/handler/staff.go` call `service.RequireStaff` themselves before calling the service. AGENTS.md says handlers never check roles. The rule itself still lives in the service, and `Labs.Add` checks it again, so the result is right. But the handler now decides when authorization runs: it does so to answer 403 before reading the form. `newLabForm` has no service call, so the role check is its only guard. An MCP `add_lab` tool will not get this early check, so the two paths differ in when they refuse, though not in what they refuse. The fix is a service method such as `Labs.NewLabForm(caller)` that the GET handler calls, and dropping the handler's own check from `addLab`.
 
 ## Acceptance criteria
 Each criterion is one behaviour, written as Given / When / Then, and tagged with how it is checked: `[http]` request and response, `[db]` database state, `[ui]` browser, `[mcp]` MCP tool call. IDs are stable once a test names them: new criteria get new numbers, and removed ones are listed at the end, not reused.
@@ -160,7 +172,12 @@ Each criterion here covers only the pages that exist in the slice being checked:
 <!-- Filled in from Exercise 3 onward: each AC id, and the test that names it. -->
 | Criterion | Test |
 | --- | --- |
-| AC-1 |  |
+| AC-12 | `TestAddLabCreatesOneLab_AC12`, `TestAddLabAcceptsAPlaceLimitOfOne_AC12`, `TestAC12_StaffAddsLabAndItAppearsOnLabs`, `TestAC12_DB_StaffAddsLabAndLabsGainsOneRow` |
+| AC-13 | `TestAddLabRejectsBadPlaceLimit_AC13`, `TestAC13_BadPlaceLimitShowsMessageAndCreatesNothing`, `TestAC13_DB_BadPlaceLimitCreatesNoRow` |
+| AC-2 | `TestAddLabDuplicateTitleIsConflict_AC2`, `TestAC2_DuplicateTitleIs409`, `TestAC2_DB_DuplicateTitleIs409AndNoRow` |
+| AC-14 | `TestLabBookingsListsExactlyTheBookers_AC14`, `TestAC14_StaffSeesBookersTable`, `TestAC14_DB_StaffSeesExactlyTheStudentsWhoBooked` |
+| AC-15 | `TestAddLabStudentIsForbidden_AC15`, `TestRequireStaff_AC15`, `TestAC15_StudentGetAndPostNewLabAre403`, `TestAC15_DB_StudentGetsAndPosts403AndNoRow` |
+| AC-45 | `TestLabBookingsStudentIsForbidden_AC45`, `TestAC45_StudentGetsStaffLabPage403`, `TestAC45_DB_StudentGetsStaffLabPage403` |
 
 ## Spec vs result
 <!-- After the agent builds the slice: which criteria passed, which it missed or reinterpreted, and what you changed in this spec because of it. -->

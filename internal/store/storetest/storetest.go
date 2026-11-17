@@ -47,6 +47,14 @@ func Open(t testing.TB) *pgxpool.Pool {
 	return pool
 }
 
+// InsertBooking adds a bookings row directly, for tests that need bookings before the booking feature exists.
+func InsertBooking(t testing.TB, pool *pgxpool.Pool, userID, labID int64) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `INSERT INTO bookings (user_id, lab_id) VALUES ($1, $2)`, userID, labID); err != nil {
+		t.Fatalf("insert booking: %v", err)
+	}
+}
+
 // Count returns the number of rows in table. table must be a trusted constant.
 func Count(t testing.TB, pool *pgxpool.Pool, table string) int {
 	t.Helper()

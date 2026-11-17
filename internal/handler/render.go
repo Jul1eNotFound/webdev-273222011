@@ -5,6 +5,7 @@ import (
 	"errors"
 	"html/template"
 	"net/http"
+	"time"
 
 	"github.com/Jul1eNotFound/webdev-273222011/internal/auth"
 	"github.com/Jul1eNotFound/webdev-273222011/internal/service"
@@ -16,27 +17,45 @@ const msgInternal = "Something went wrong on our side. Please try again."
 
 // pageData is what every template receives. Title must differ per page (AC-42).
 type pageData struct {
-	Title string
-	User  *service.Caller
-	Error string
-	Email string
-	Labs  []store.Lab
+	Title   string
+	User    *service.Caller
+	Error   string
+	Success string
+	Email   string
+	Labs    []store.Lab
+	Form    service.NewLab
+	Lab     *store.Lab
+	Bookers []store.Booker
 }
 
 type renderer struct {
 	pages map[string]*template.Template
 }
 
-func newRenderer() (*renderer, error) {
+// newRenderer takes the timezone that lab times are shown in.
+func newRenderer(loc *time.Location) (*renderer, error) {
 	rn := &renderer{pages: map[string]*template.Template{}}
-	for _, name := range []string{"login", "labs", "error"} {
-		t, err := template.ParseFS(web.FS, "templates/layout.html", "templates/"+name+".html")
+	funcs := template.FuncMap{"period": period(loc)}
+	for _, name := range []string{"login", "labs", "error", "lab_new", "lab_staff"} {
+		t, err := template.New(name).Funcs(funcs).ParseFS(web.FS, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err
 		}
 		rn.pages[name] = t
 	}
 	return rn, nil
+}
+
+// period shows a lab's time period as "HH:MM–HH:MM" within one day, and as
+// "D Mon HH:MM – D Mon HH:MM" across days, in the server's timezone (SPEC decisions).
+func period(loc *time.Location) func(from, to time.Time) string {
+	return func(from, to time.Time) string {
+		from, to = from.In(loc), to.In(loc)
+		if from.Year() == to.Year() && from.YearDay() == to.YearDay() {
+			return from.Format("15:04") + "–" + to.Format("15:04")
+		}
+		return from.Format("2 Jan 15:04") + " – " + to.Format("2 Jan 15:04")
+	}
 }
 
 // page renders into a buffer first, so a template error never sends half a page.

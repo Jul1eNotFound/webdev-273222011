@@ -1,0 +1,5 @@
+{
+  // Tests run from the editor (Run test, Testing panel, debug) get the variables in .env.
+  // Nothing in the Go code reads .env itself: the app only uses real environment variables.
+  "go.testEnvFile": "${workspaceFolder}/.env"
+}

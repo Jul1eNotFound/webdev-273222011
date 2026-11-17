@@ -1,6 +1,6 @@
 {{define "content"}}
 <h1>Labs available today</h1>
 <ul class="lab-list">
-  {{range .Labs}}<li class="lab-list__item">{{.Title}}</li>{{end}}
+  {{range .Labs}}<li class="lab-list__item">{{if $.User.IsStaff}}<a href="/staff/labs/{{.ID}}">{{.Title}}</a>{{else}}{{.Title}}{{end}}</li>{{end}}
 </ul>
 {{end}}
