@@ -348,4 +348,12 @@ func TestEnsureSessionAddsNothingTheSecondTime(t *testing.T) {
 	if _, err := st.EnsureSession(ctx, lab, store.Period{StartsAt: at(1), EndsAt: at(3)}); !errors.Is(err, store.ErrOverlap) {
 		t.Fatalf("a different overlapping period: err = %v, want ErrOverlap", err)
 	}
+	// A cancelled session is found again too: the overlap constraint ignores it, so it must not get a live copy.
+	if _, err := st.CancelSession(ctx, first, at(-1), func(store.SessionView) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	again, err = st.EnsureSession(ctx, lab, store.Period{StartsAt: at(0), EndsAt: at(2)})
+	if err != nil || again != first || countSessions(t, pool, lab) != 1 {
+		t.Fatalf("after cancelling: again = %d (first %d), err = %v, sessions = %d", again, first, err, countSessions(t, pool, lab))
+	}
 }

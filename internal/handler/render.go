@@ -34,6 +34,9 @@ type pageData struct {
 	// Form and SessionForm are what was typed, shown again with a validation message.
 	Form        service.NewLab
 	SessionForm service.NewSession
+	// CancelSession and DeleteLab are what a confirmation page is about (AC-76).
+	CancelSession *service.SessionCard
+	DeleteLab     *service.LabPage
 }
 
 type renderer struct {
@@ -44,7 +47,7 @@ type renderer struct {
 func newRenderer(loc *time.Location) (*renderer, error) {
 	rn := &renderer{pages: map[string]*template.Template{}}
 	funcs := template.FuncMap{"period": period(loc), "day": day(loc)}
-	for _, name := range []string{"login", "labs", "lab", "error", "my_labs", "lab_new", "lab_staff"} {
+	for _, name := range []string{"login", "labs", "lab", "error", "my_labs", "lab_new", "lab_staff", "confirm"} {
 		t, err := template.New(name).Funcs(funcs).ParseFS(web.FS, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err

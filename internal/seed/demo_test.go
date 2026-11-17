@@ -140,3 +140,21 @@ func TestDemoHasALabThatRunsWeekly_AC67(t *testing.T) {
 		t.Errorf("Pendulum timing has %d sessions, want 3 weekly ones", weekly)
 	}
 }
+
+func TestDemoHasACancelledSessionThatKeptItsBooking_AC73(t *testing.T) {
+	pool := storetest.Open(t)
+	st := store.New(pool)
+	seedAll(t, st)
+	seedAll(t, st) // and running it again adds no live copy of the cancelled session
+	var cancelled, booked, sessions int
+	if err := pool.QueryRow(context.Background(), `
+		SELECT count(*) FILTER (WHERE s.cancelled_at IS NOT NULL),
+		       coalesce(sum((SELECT count(*) FROM bookings b WHERE b.session_id = s.id)) FILTER (WHERE s.cancelled_at IS NOT NULL), 0),
+		       count(*)
+		FROM lab_sessions s JOIN labs l ON l.id = s.lab_id WHERE l.title = 'Soldering practice'`).Scan(&cancelled, &booked, &sessions); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled != 1 || booked != 1 || sessions != 1 {
+		t.Errorf("Soldering practice: %d cancelled of %d sessions, %d kept bookings; want 1 of 1 with 1", cancelled, sessions, booked)
+	}
+}

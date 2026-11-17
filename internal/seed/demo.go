@@ -40,6 +40,8 @@ type demoLab struct {
 	// sessions are the lab's sessions; the first one is the one the demo students booked.
 	sessions []store.Period
 	bookers  []string // emails of the demo students who booked its first session
+	// cancelled makes the owner cancel the first session after the bookings, which are kept (Slice 3c).
+	cancelled bool
 }
 
 const (
@@ -59,6 +61,7 @@ func demoLabs(now time.Time, loc *time.Location) []demoLab {
 			sessions: []store.Period{{StartsAt: from, EndsAt: to}}, bookers: bookers,
 		}
 	}
+	cancel := func(d demoLab) demoLab { d.cancelled = true; return d }
 	weekly := func(d demoLab, weeks int) demoLab {
 		first := d.sessions[0]
 		for w := 1; w < weeks; w++ {
@@ -75,8 +78,8 @@ func demoLabs(now time.Time, loc *time.Location) []demoLab {
 			"diego@labwiz.test", "eva@labwiz.test", "farah@labwiz.test"), // one place left
 		lab(dana, "Evening astronomy", "Telescope session on the roof, weather permitting.", at(0, 21), at(1, 1), 12,
 			"ben@labwiz.test", "eva@labwiz.test"), // runs past midnight
-		lab(omar, "Soldering practice", "Solder a small LED kit. Safety glasses provided.", at(1, 9), at(1, 11), 5,
-			"chen@labwiz.test"),
+		cancel(lab(omar, "Soldering practice", "Solder a small LED kit. Safety glasses provided.", at(1, 9), at(1, 11), 5,
+			"chen@labwiz.test")), // cancelled, with Chen's booking kept
 		lab(dana, "Spectroscopy", "Identify gases from their emission lines.", at(1, 13), at(1, 15), 4),
 		lab(dana, "Organic chemistry", "Synthesis of aspirin.", at(2, 10), at(2, 13), 8),
 		lab(omar, "Machine learning lab", "Train a small image classifier on the lab GPUs.", at(7, 14), at(7, 17), 20),
@@ -110,7 +113,7 @@ func Demo(ctx context.Context, st *store.Store, now time.Time, loc *time.Locatio
 		ids[a.Email] = u.ID
 	}
 	skipTaken := func(s store.SessionView, mine bool) error {
-		if mine || s.Booked >= s.PlaceLimit {
+		if mine || s.Booked >= s.PlaceLimit || s.CancelledAt != nil {
 			return errSkip
 		}
 		return nil
@@ -142,6 +145,17 @@ func Demo(ctx context.Context, st *store.Store, now time.Time, loc *time.Locatio
 			}
 			if _, err := st.BookSession(ctx, userID, booked, skipTaken); err != nil && !errors.Is(err, errSkip) {
 				return fmt.Errorf("book %q for %s: %w", d.lab.Title, email, err)
+			}
+		}
+		if d.cancelled {
+			skipCancelled := func(s store.SessionView) error {
+				if s.CancelledAt != nil {
+					return errSkip
+				}
+				return nil
+			}
+			if _, err := st.CancelSession(ctx, booked, now, skipCancelled); err != nil && !errors.Is(err, errSkip) {
+				return fmt.Errorf("cancel %q: %w", d.lab.Title, err)
 			}
 		}
 	}

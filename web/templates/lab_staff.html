@@ -4,6 +4,7 @@
 <h1>{{.Lab.Title}}</h1>
 <p class="lab-meta">{{.Lab.PlaceLimit}} places per session</p>
 {{with .Lab.Description}}<p>{{.}}</p>{{end}}
+{{if .Deletable}}<p><a href="/staff/labs/{{.Lab.ID}}/delete">Delete lab</a></p>{{end}}
 
 <h2>Add a session</h2>
 {{with $.Error}}<p class="message message--error" role="alert">{{.}}</p>{{end}}
@@ -33,7 +34,8 @@
 {{range .}}
 {{$d := day .StartsAt}}{{if ne $d $day}}<h3>{{$d}}</h3>{{$day = $d}}{{end}}
 <section class="lab-list__item session">
-  <p class="lab-meta"><strong>{{period .StartsAt .EndsAt}}</strong> · {{.Booked}} of {{.PlaceLimit}} places booked</p>
+  <p class="lab-meta"><strong>{{period .StartsAt .EndsAt}}</strong> · {{.Booked}} of {{.PlaceLimit}} places booked{{if .Cancelled}} · <span class="lab-card__cancelled">Cancelled</span>{{end}}</p>
+  {{if .Cancellable}}<p><a href="/staff/sessions/{{.SessionID}}/cancel">Cancel session</a></p>{{end}}
   {{if .Bookers}}
   <table class="table">
     <caption>Booked by</caption>

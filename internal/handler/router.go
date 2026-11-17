@@ -73,6 +73,10 @@ func New(d Deps) (http.Handler, error) {
 		r.Post("/staff/labs/new", h.addLab)
 		r.Get("/staff/labs/{id}", h.staffLabPage)
 		r.Post("/staff/labs/{id}/sessions", h.addSessions)
+		r.Get("/staff/labs/{id}/delete", h.deletePage)
+		r.Post("/staff/labs/{id}/delete", h.deleteLab)
+		r.Get("/staff/sessions/{id}/cancel", h.cancelPage)
+		r.Post("/staff/sessions/{id}/cancel", h.cancelSession)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(mw.RequireAPI)

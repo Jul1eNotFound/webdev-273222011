@@ -139,23 +139,22 @@ func sessionInsertError(err error) error {
 	return err
 }
 
-// EnsureSession returns the id of the lab's session with exactly this period, adding it if there is none.
-// The seed uses it, so running the seed again adds nothing. A different session in the way gives ErrOverlap.
+// EnsureSession returns the id of the lab's session with exactly this period, cancelled or not, adding it
+// if there is none. The seed uses it, so running the seed again adds nothing: the overlap constraint alone
+// would not do, since it ignores a cancelled session and would let a live copy of it in. A different
+// session in the way gives ErrOverlap.
 func (s *Store) EnsureSession(ctx context.Context, labID int64, p Period) (int64, error) {
 	var id int64
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO lab_sessions (lab_id, starts_at, ends_at) VALUES ($1, $2, $3)
-		ON CONFLICT DO NOTHING
-		RETURNING id`, labID, p.StartsAt, p.EndsAt).Scan(&id)
+		SELECT id FROM lab_sessions
+		WHERE lab_id = $1 AND starts_at = $2 AND ends_at = $3
+		ORDER BY cancelled_at NULLS FIRST, id
+		LIMIT 1`, labID, p.StartsAt, p.EndsAt).Scan(&id)
 	if !errors.Is(err, pgx.ErrNoRows) {
-		return id, sessionInsertError(err)
+		return id, err
 	}
 	err = s.db.QueryRow(ctx, `
-		SELECT id FROM lab_sessions
-		WHERE lab_id = $1 AND starts_at = $2 AND ends_at = $3 AND cancelled_at IS NULL`,
+		INSERT INTO lab_sessions (lab_id, starts_at, ends_at) VALUES ($1, $2, $3) RETURNING id`,
 		labID, p.StartsAt, p.EndsAt).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return 0, ErrOverlap
-	}
-	return id, err
+	return id, sessionInsertError(err)
 }

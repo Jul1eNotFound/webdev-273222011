@@ -1,0 +1,19 @@
+{{define "content"}}
+{{with .CancelSession}}
+<h1>Cancel a session</h1>
+<p>Cancel the session of <strong>{{.Title}}</strong> on {{day .StartsAt}}, {{period .StartsAt .EndsAt}}?
+{{if .Booked}}Its {{.Booked}} {{if eq .Booked 1}}booking is{{else}}bookings are{{end}} kept, and the students see that it was cancelled.{{else}}Nobody has booked it yet.{{end}}</p>
+<form method="post" action="/staff/sessions/{{.SessionID}}/cancel" class="confirm-form">
+  <button type="submit" class="button">Cancel session</button>
+</form>
+<p><a href="/staff/labs/{{.LabID}}">Keep it</a></p>
+{{end}}
+{{with .DeleteLab}}
+<h1>Delete a lab</h1>
+<p>Delete <strong>{{.Lab.Title}}</strong> and its {{len .Sessions}} {{if eq (len .Sessions) 1}}session{{else}}sessions{{end}}? This cannot be undone.</p>
+<form method="post" action="/staff/labs/{{.Lab.ID}}/delete" class="confirm-form">
+  <button type="submit" class="button">Delete lab</button>
+</form>
+<p><a href="/staff/labs/{{.Lab.ID}}">Keep it</a></p>
+{{end}}
+{{end}}

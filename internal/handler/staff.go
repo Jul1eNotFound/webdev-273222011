@@ -20,7 +20,11 @@ func (h *handler) myLabsPage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.page(w, http.StatusOK, "my_labs", pageData{Title: "My labs · Labwiz", User: &c, MyLabs: labs})
+	data := pageData{Title: "My labs · Labwiz", User: &c, MyLabs: labs}
+	if r.URL.Query().Get("deleted") == "1" {
+		data.Success = "Lab deleted."
+	}
+	h.page(w, http.StatusOK, "my_labs", data)
 }
 
 func (h *handler) newLabForm(w http.ResponseWriter, r *http.Request) {
@@ -84,6 +88,8 @@ func (h *handler) staffLabPage(w http.ResponseWriter, r *http.Request) {
 	switch n, _ := strconv.Atoi(q.Get("scheduled")); {
 	case q.Get("created") == "1":
 		data.Success = "Lab added. Add its first session below."
+	case q.Get("cancelled") == "1":
+		data.Success = "Session cancelled."
 	case n == 1:
 		data.Success = "Session added."
 	case n > 1:

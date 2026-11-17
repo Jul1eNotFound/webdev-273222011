@@ -1,4 +1,5 @@
 {{define "content"}}
+{{with .Success}}<p class="message message--success" role="status">{{.}}</p>{{end}}
 <h1>My labs</h1>
 {{if .MyLabs}}
 <ul class="lab-list">

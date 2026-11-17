@@ -37,9 +37,12 @@
 {{define "freePlaces"}}<span class="lab-card__free" data-free-places>{{.FreePlaces}} of {{.PlaceLimit}} places free</span>{{end}}
 
 {{/* The Book button of a service.SessionCard: a real form, so it works without the script too (AC-8).
-     It is disabled as "Closed" once the session has started (AC-83), and as "Full" when no place is left. */}}
+     It is disabled as "Closed" once the session has started (AC-83), and as "Full" when no place is left.
+     A cancelled session has no form at all, only the word "Cancelled" (AC-73). */}}
 {{define "bookForm"}}
+{{if .Cancelled}}<p class="lab-card__cancelled">Cancelled</p>{{else}}
 <form method="post" action="/sessions/{{.SessionID}}/book" class="book-form">
   {{if .Started}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Closed</button>{{else if gt .FreePlaces 0}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title">Book</button>{{else}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Full</button>{{end}}
 </form>
+{{end}}
 {{end}}
