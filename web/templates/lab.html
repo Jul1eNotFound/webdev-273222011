@@ -1,0 +1,13 @@
+{{define "content"}}
+{{with .Success}}<p class="message message--success" role="status">{{.}}</p>{{end}}
+<p id="flash" class="message" role="status" hidden></p>
+{{with .Card}}
+<section data-lab="{{.ID}}">
+  <h1 id="lab-{{.ID}}-title">{{.Title}}</h1>
+  <p class="lab-meta">{{period .StartsAt .EndsAt}} · {{template "freePlaces" .}}</p>
+  {{with .Description}}<p>{{.}}</p>{{end}}
+  {{if $.User.IsStaff}}<p><a href="/staff/labs/{{.ID}}">See who booked this lab</a></p>{{else}}{{template "bookForm" .}}{{end}}
+</section>
+{{end}}
+<p><a href="/labs">Back to the lab list</a></p>
+{{end}}

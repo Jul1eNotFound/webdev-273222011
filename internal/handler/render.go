@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"html/template"
 	"net/http"
@@ -25,6 +26,7 @@ type pageData struct {
 	Labs    []service.LabCard
 	Form    service.NewLab
 	Lab     *store.Lab
+	Card    *service.LabCard
 	Bookers []store.Booker
 }
 
@@ -36,7 +38,7 @@ type renderer struct {
 func newRenderer(loc *time.Location) (*renderer, error) {
 	rn := &renderer{pages: map[string]*template.Template{}}
 	funcs := template.FuncMap{"period": period(loc)}
-	for _, name := range []string{"login", "labs", "error", "lab_new", "lab_staff"} {
+	for _, name := range []string{"login", "labs", "lab", "error", "lab_new", "lab_staff"} {
 		t, err := template.New(name).Funcs(funcs).ParseFS(web.FS, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err
@@ -69,6 +71,13 @@ func (h *handler) page(w http.ResponseWriter, status int, name string, data page
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = buf.WriteTo(w)
+}
+
+// writeJSON is for the booking script only; pages are always HTML.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }
 
 // errorPage shows one readable sentence (AC-43).

@@ -126,7 +126,7 @@ func TestAC30_NoAnimationThemeToggleOrLanguageSwitcher(t *testing.T) {
 	c := newClient(t)
 	signIn(t, c, base, studentEmail, studentPass)
 	forbidden := regexp.MustCompile(`(?i)transition|animation|@keyframes|prefers-color-scheme|data-theme|hreflang`)
-	for _, path := range []string{"/static/style.css", "/labs", "/login"} {
+	for _, path := range []string{"/static/style.css", "/labs", "/labs/1", "/login"} {
 		r := do(t, c, http.MethodGet, base+path, nil)
 		if r.status != http.StatusOK && path != "/login" {
 			t.Fatalf("GET %s = %d", path, r.status)
@@ -157,6 +157,7 @@ func TestAC42_EachPageHasLangEnAndItsOwnTitle(t *testing.T) {
 	pages := map[string]string{"/login": do(t, c, http.MethodGet, base+"/login", nil).body}
 	signIn(t, c, base, studentEmail, studentPass)
 	pages["/labs"] = do(t, c, http.MethodGet, base+"/labs", nil).body
+	pages["/labs/1"] = do(t, c, http.MethodGet, base+"/labs/1", nil).body
 	pages["error"] = do(t, c, http.MethodGet, base+"/no-such-page", nil).body
 
 	titleRe := regexp.MustCompile(`<title>([^<]+)</title>`)
@@ -204,15 +205,5 @@ func TestAC43_FailuresShowOneReadableSentence(t *testing.T) {
 		if m := leak.FindString(r.body); m != "" {
 			t.Errorf("%s %s leaks %q", tc.method, tc.path, m)
 		}
-	}
-}
-
-func TestSignedInBookingIsNotImplementedYet(t *testing.T) {
-	base, _ := newFakeApp(t)
-	c := newClient(t)
-	signIn(t, c, base, studentEmail, studentPass)
-	r := do(t, c, http.MethodPost, base+"/labs/1/book", url.Values{})
-	if r.status != http.StatusNotImplemented || !strings.Contains(r.body, "Booking is not available yet.") {
-		t.Fatalf("got %d\n%s", r.status, r.body)
 	}
 }

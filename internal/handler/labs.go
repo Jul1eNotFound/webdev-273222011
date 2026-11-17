@@ -1,10 +1,19 @@
 package handler
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/Jul1eNotFound/webdev-273222011/internal/auth"
+	"github.com/Jul1eNotFound/webdev-273222011/internal/service"
 )
+
+const msgBooked = "Booking confirmed."
 
 func (h *handler) labsPage(w http.ResponseWriter, r *http.Request) {
 	c, _ := auth.CallerFrom(r.Context())
@@ -16,7 +25,69 @@ func (h *handler) labsPage(w http.ResponseWriter, r *http.Request) {
 	h.page(w, http.StatusOK, "labs", pageData{Title: "Labs · Labwiz", User: &c, Labs: labs})
 }
 
-// bookStub exists so the 401 for visitors who are not signed in can be tested now (AC-19). Slice 3 replaces it.
-func (h *handler) bookStub(w http.ResponseWriter, r *http.Request) {
-	h.errorPage(w, r, http.StatusNotImplemented, "Booking is not available yet.")
+// labPage shows one lab with its free places and, for students, a Book button.
+func (h *handler) labPage(w http.ResponseWriter, r *http.Request) {
+	c, _ := auth.CallerFrom(r.Context())
+	lab, err := h.Labs.Get(r.Context(), c, labID(r))
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	data := pageData{Title: lab.Title + " · Labwiz", User: &c, Card: &lab}
+	if r.URL.Query().Get("booked") == "1" {
+		data.Success = msgBooked
+	}
+	h.page(w, http.StatusOK, "lab", data)
+}
+
+// bookingReply is what the booking script reads. It is never shown to the user as it is (AC-43).
+type bookingReply struct {
+	Message    string `json:"message"`
+	FreePlaces *int   `json:"free_places,omitempty"`
+	PlaceLimit *int   `json:"place_limit,omitempty"`
+}
+
+// book books a place for the signed-in student. The script asks for JSON and updates the page in place
+// (AC-4); a plain form post is redirected to the lab page, or shown the error page (AC-1).
+func (h *handler) book(w http.ResponseWriter, r *http.Request) {
+	c, _ := auth.CallerFrom(r.Context())
+	lab, err := h.Labs.Book(r.Context(), c, labID(r))
+	if !wantsJSON(r) {
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		http.Redirect(w, r, fmt.Sprintf("/labs/%d?booked=1", lab.ID), http.StatusSeeOther)
+		return
+	}
+	if err != nil {
+		h.failJSON(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, bookingReply{Message: msgBooked, FreePlaces: &lab.FreePlaces, PlaceLimit: &lab.PlaceLimit})
+}
+
+// labID reads the {id} route parameter. Anything that is not a number becomes 0, which matches no lab.
+func labID(r *http.Request) int64 {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
+// wantsJSON tells the booking script's requests apart from plain form posts.
+func wantsJSON(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "application/json")
+}
+
+// failJSON is fail for the booking script: the same status and sentence, as JSON.
+func (h *handler) failJSON(w http.ResponseWriter, r *http.Request, err error) {
+	var se *service.Error
+	if errors.As(err, &se) {
+		writeJSON(w, statusFor(se.Kind), bookingReply{Message: se.Message})
+		return
+	}
+	h.Log.Error("request failed", "method", r.Method, "path", r.URL.Path, "err", err)
+	writeJSON(w, http.StatusInternalServerError, bookingReply{Message: msgInternal})
 }

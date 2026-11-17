@@ -38,6 +38,10 @@ func New(d Deps) (http.Handler, error) {
 	mw := auth.Middleware{
 		Sessions: d.Auth,
 		Unauthorized: func(w http.ResponseWriter, r *http.Request) {
+			if wantsJSON(r) {
+				h.failJSON(w, r, service.ErrUnauthenticated)
+				return
+			}
 			h.fail(w, r, service.ErrUnauthenticated)
 		},
 		Fail: h.fail,
@@ -63,13 +67,14 @@ func New(d Deps) (http.Handler, error) {
 	r.Group(func(r chi.Router) {
 		r.Use(mw.RequirePage)
 		r.Get("/labs", h.labsPage)
+		r.Get("/labs/{id}", h.labPage)
 		r.Get("/staff/labs/new", h.newLabForm)
 		r.Post("/staff/labs/new", h.addLab)
 		r.Get("/staff/labs/{id}", h.staffLabPage)
 	})
 	r.Group(func(r chi.Router) {
 		r.Use(mw.RequireAPI)
-		r.Post("/labs/{id}/book", h.bookStub)
+		r.Post("/labs/{id}/book", h.book)
 	})
 	return r, nil
 }

@@ -27,3 +27,13 @@
 </body>
 </html>
 {{end}}
+
+{{/* Free places of a service.LabCard. The booking script rewrites the text after a booking. */}}
+{{define "freePlaces"}}<span class="lab-card__free" data-free-places>{{.FreePlaces}} of {{.PlaceLimit}} places free</span>{{end}}
+
+{{/* The Book button of a service.LabCard: a real form, so it works without the script too (AC-8). */}}
+{{define "bookForm"}}
+<form method="post" action="/labs/{{.ID}}/book" class="book-form">
+  {{if gt .FreePlaces 0}}<button type="submit" class="button" aria-describedby="lab-{{.ID}}-title">Book</button>{{else}}<button type="submit" class="button" aria-describedby="lab-{{.ID}}-title" disabled>Full</button>{{end}}
+</form>
+{{end}}
