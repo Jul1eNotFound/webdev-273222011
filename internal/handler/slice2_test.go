@@ -222,6 +222,18 @@ func TestAC41_AddLabFormFieldsHaveLabels(t *testing.T) {
 	}
 }
 
+// The header's "Labwiz" also links to /labs, so look for the visible link text, not just the href.
+func TestStaffPagesLinkBackToTheLabList(t *testing.T) {
+	base, _ := newStaffApp(t)
+	c := signedIn(t, base, staffEmail, staffPass)
+	back := `<a href="/labs">Back to the lab list</a>`
+	for _, path := range []string{"/staff/labs/new", "/staff/labs/1"} {
+		wantStatus(t, do(t, c, http.MethodGet, base+path, nil), http.StatusOK, back)
+	}
+	// Also when the form comes back with a validation message.
+	wantStatus(t, do(t, c, http.MethodPost, base+"/staff/labs/new", labForm("Optics", "0")), http.StatusBadRequest, back)
+}
+
 func TestAC42_StaffPagesHaveLangEnAndTheirOwnTitles(t *testing.T) {
 	base, _ := newStaffApp(t)
 	c := newClient(t)
