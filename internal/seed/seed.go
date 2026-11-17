@@ -49,7 +49,7 @@ func Run(ctx context.Context, st *store.Store, now time.Time, loc *time.Location
 		{Title: "Robotics intro", Description: "Program a line-following robot.", StartsAt: at(1, 9), EndsAt: at(1, 12), PlaceLimit: 8},
 	}
 	for _, l := range labs {
-		if err := st.UpsertLab(ctx, l); err != nil {
+		if _, err := st.UpsertLab(ctx, l); err != nil {
 			return err
 		}
 	}

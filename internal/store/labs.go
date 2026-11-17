@@ -92,14 +92,16 @@ func (s *Store) LabsAvailableBetween(ctx context.Context, from, to time.Time) ([
 	})
 }
 
-// UpsertLab creates or refreshes a seeded lab, matched on title.
-func (s *Store) UpsertLab(ctx context.Context, l Lab) error {
-	_, err := s.db.Exec(ctx, `
+// UpsertLab creates or refreshes a seeded lab, matched on title, and returns its id.
+func (s *Store) UpsertLab(ctx context.Context, l Lab) (int64, error) {
+	var id int64
+	err := s.db.QueryRow(ctx, `
 		INSERT INTO labs (title, description, starts_at, ends_at, place_limit)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (title) DO UPDATE
 		SET description = EXCLUDED.description, starts_at = EXCLUDED.starts_at,
-		    ends_at = EXCLUDED.ends_at, place_limit = EXCLUDED.place_limit`,
-		l.Title, l.Description, l.StartsAt, l.EndsAt, l.PlaceLimit)
-	return err
+		    ends_at = EXCLUDED.ends_at, place_limit = EXCLUDED.place_limit
+		RETURNING id`,
+		l.Title, l.Description, l.StartsAt, l.EndsAt, l.PlaceLimit).Scan(&id)
+	return id, err
 }

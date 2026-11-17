@@ -8,6 +8,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+# demo logins written by go run ./cmd/seed
+seed-credentials.txt
 
 # local databases and build output
 *.db
