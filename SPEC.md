@@ -59,7 +59,7 @@ lab booking
   2. **Lab list** (`/labs`, `/labs?date=YYYY-MM-DD`): the sessions on one day (today by default) as cards, each with lab title, description, owner ("Run by …"), time period and free places. Links to the previous and next day and a labelled date field change the day. A smart-search box with editable filter chips. Each card has a "Book" button, which is disabled and reads "Full" when no places are left, "Closed" once the session has started, "Cancelled" when staff cancelled it, and "Booked" when the student has booked it. The empty state reads "No labs available today", "No labs on this day" for another day, or "No labs match these filters" when search filters are applied.
   3. **Lab detail and my bookings** (`/labs/{id}`, `/bookings`): a lab's details and owner, and its upcoming sessions, each with "Book" or "Cancel booking". The bookings page lists the student's own bookings, marking those whose session was cancelled as "Cancelled by staff". When a student books a full session, they see "This lab is full" with links back to the lab list and the home page (AC-1).
   4. **Staff: my labs, add lab** (`/staff/labs`, `/staff/labs/new`): the labs the signed-in staff member owns, each with its next session, and a form with title, description and place limit. Students get 403.
-  5. **Staff: one owned lab** (`/staff/labs/{id}`): the lab's details, an "Add a session" form (date, start time, end time, optional "Repeat weekly until"), and its sessions grouped by date, upcoming first, each with the places booked, the students who booked it and a "Cancel session" link. A "Delete lab" link while nobody has booked it. Only the owner may open it; everyone else gets 403.
+  5. **Staff: one owned lab** (`/staff/labs/{id}`): the lab's details, an "Add a session" form (Starts and Ends as dates with times, so a session may run past midnight, and an optional "Repeat weekly until" date that adds the same session every week, at most 26), and its sessions grouped by date, upcoming first, each with the places booked, the students who booked it and a "Cancel session" link. A "Delete lab" link while nobody has booked it. Only the owner may open it; everyone else gets 403.
   6. **Confirmations** (`/staff/labs/{id}/delete`, `/staff/sessions/{id}/cancel`): one sentence naming what will change, a button that confirms it (POST), and a link back that changes nothing.
 - Layout: a single column that works at 380 px and widens to a centred max width on desktop. The header has the app name, the signed-in user and a Sign out button, and for staff "My labs" and "Add a lab". Light theme only.
 - States, on every screen: loading (static "Loading…" text), empty, error (one readable sentence) and success (a message at the top of the page, no reload needed).
@@ -72,8 +72,8 @@ Layers: handler → service → store → database. HTTP and MCP both go through
 A staff member adds a lab (`POST /staff/labs/new`):
 1. **Entry**: `cmd/server/main.go` loads config, opens the pool and wires store, services and router together.
 2. **Routing and session**: `internal/handler/router.go` matches the route inside the `RequirePage` group. `internal/auth/session.go` reads the cookie, gets the caller from `service.Auth.CurrentUser` (`internal/service/auth.go`), and puts it in the request context. With no valid session, the visitor is redirected to `/login`.
-3. **Handler**: `addLab` in `internal/handler/staff.go` caps the body size, parses the form into `service.NewLab` and calls `Labs.Add`. It does not check the role: no handler does.
-4. **Service**: `Labs.Add` in `internal/service/labs.go` checks the role (`RequireStaff`, AC-15), validates the title, time period and place limit (AC-13), makes the caller the owner (AC-60), and maps `store.ErrDuplicate` to `ErrDuplicateTitle` (AC-2). The role and ownership checks (`RequireStaff`, `RequireOwner`) are in `internal/service/auth.go`, the typed errors in `internal/service/errors.go`.
+3. **Handler**: `addLab` in `internal/handler/staff.go` caps the body size, parses the form (title, description, place limit) into `service.NewLab` and calls `Labs.Add`. It does not check the role: no handler does.
+4. **Service**: `Labs.Add` in `internal/service/labs.go` checks the role (`RequireStaff`, AC-15), validates the title and place limit (AC-13), makes the caller the owner (AC-60), and maps `store.ErrDuplicate` to `ErrDuplicateTitle` (AC-2). The role and ownership checks (`RequireStaff`, `RequireOwner`) are in `internal/service/auth.go`, the typed errors in `internal/service/errors.go`.
 5. **Store**: `CreateLab` in `internal/store/labs.go` runs the only SQL, an `INSERT … RETURNING id` that includes `owner_id`, and turns SQLSTATE `23505` into `ErrDuplicate`.
 6. **Database**: the `labs` table and its unique title come from `migrations/000001_init.up.sql`, and its required `owner_id`, a foreign key to `users`, from `migrations/000003_lab_owners.up.sql`. The unique constraint, not a prior lookup, decides a duplicate title, so two staff adding the same title at once cannot both succeed.
 7. **Back out**: on success the handler redirects to `/staff/labs/{id}?created=1`. A validation or conflict error re-renders `web/templates/lab_new.html` with the message and the typed values (400/409). Any other error goes through `fail` → `statusFor` in `internal/handler/render.go`, which shows one readable sentence (AC-43).
@@ -82,7 +82,7 @@ A staff member adds a lab (`POST /staff/labs/new`):
 
 Slice 3a removed the earlier mismatch: `internal/handler/staff.go` used to call `service.RequireStaff` itself. The GET handler now asks `Labs.NewLabForm(caller)`, and `addLab` leaves the role check to `Labs.Add`, so HTTP and MCP refuse a student at the same point.
 
-This section describes the code as it is. Slice 3b changes the add-lab form (no time period) and moves bookings onto sessions; the trace is updated then.
+This section describes the code as it is after Slice 3b. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row.
 
 ## Decisions
 How the criteria are written:
@@ -134,10 +134,10 @@ The pages:
 - [AC-23] [ui] Given no lab is available today, when `/labs` is opened without a date or a search, then it shows "No labs available today".
 
 ### Slice 2: staff adds labs
-- [AC-12] [ui][db] Given a signed-in staff member, when they submit a title, description and a place limit of 1 or more, then `labs` gains one row and they land on that lab's staff page. Until Slice 3b the form also takes a time period, and the lab appears on `/labs` on that day.
+- [AC-12] [ui][db] Given a signed-in staff member, when they submit a title, description and a place limit of 1 or more, then `labs` gains one row and they land on that lab's staff page. The lab appears on `/labs` once it has a session that day (AC-67).
 - [AC-13] [http][db] Given a staff member, when they submit a place limit of 0, a negative number or non-numeric text, then a validation message is shown and no row is created.
 - [AC-2] [http][db] Given a lab titled "X" exists, when staff add another lab titled "X", then the response is 409 with "Please choose a different title" and no row is created.
-- [AC-14] [ui][db] Given a lab with bookings, when its owner opens `/staff/labs/{id}`, then the page lists the names of exactly the students in the `bookings` rows for that lab, per session from Slice 3b on. Until Slice 3a every staff member counts as the owner.
+- [AC-14] [ui][db] Given a lab with bookings, when its owner opens `/staff/labs/{id}`, then each of its sessions lists the names of exactly the students in that session's `bookings` rows.
 - [AC-15] [http][db] Given a signed-in student, when they GET or POST `/staff/labs/new`, then the response is 403 and no row is created.
 - [AC-45] [http] Given a signed-in student, when they GET `/staff/labs/{id}`, then the response is 403 and no booking list is returned.
 
@@ -160,12 +160,14 @@ The pages:
 
 ### Slice 3b: sessions
 - [AC-66] [db] Given a database with labs, time periods and bookings from before Slice 3b, when the migration runs, then each lab has one session with its old time period, each booking belongs to that session, each lab is owned by a staff account, and no lab or booking is lost.
-- [AC-67] [ui][db] Given a lab's owner, when they add a session with a date, a start time and an end time, then `lab_sessions` gains one row for that lab, and it is listed on the lab's staff page and on `/labs/{id}`.
+- [AC-67] [ui][db] Given a lab's owner, when they add a session with a start and an end, then `lab_sessions` gains one row for that lab, and it is listed on the lab's staff page and on `/labs/{id}`.
 - [AC-68] [http][db] Given a lab's owner, when they add a session whose end is not after its start, which starts in the past, or whose date or time cannot be read, then the response is 400 with a validation message and no row is created.
 - [AC-69] [http][db] Given a session of a lab, when its owner adds another session of that lab that overlaps it, then the response is 409 with "This lab already has a session at that time." and no row is created. When two overlapping sessions are added at the same time, exactly one is created.
 - [AC-70] [db] Given a lab's owner, when they add a session with "Repeat weekly until" a date, then there is one session per week up to and including that date, at most 26. If any of them would overlap an existing session, none is created and the response is 409.
 - [AC-71] [db] Given two sessions of one lab, when a student books one of them, then only that session's free places drop by 1, and the student can also book the other one.
 - [AC-72] [http][db] Given a lab, when a student or a staff member who does not own it POSTs a new session for it, then the response is 403 and no row is created.
+- [AC-83] [http][db] Given a session that has started, when a student POSTs a booking for it, then the response is 409 with "Booking is closed: this session has already started." and no row is created, and `/labs` shows its button disabled as "Closed".
+- [AC-84] [http][db] Given a session tomorrow with a free place, when a student books it, then the booking succeeds and `bookings` has one row for it.
 
 ### Slice 3c: cancelling sessions and deleting labs
 - [AC-73] [ui][db] Given an upcoming session with bookings, when its lab's owner confirms "Cancel session", then the session is marked cancelled, its `bookings` rows are kept, and `/labs` and `/labs/{id}` show it as "Cancelled" with no Book button.
@@ -176,12 +178,10 @@ The pages:
 - [AC-78] [db] Given a lab with no bookings, when its owner deletes it while a student books one of its sessions, then either the delete is refused with 409 and the booking stays, or the booking fails with 404 and the lab is gone. A booking is never deleted with the lab.
 - [AC-79] [http][db] Given a lab or a session, when a student or a staff member who does not own the lab POSTs a delete or a cancel, then the response is 403 and nothing changes.
 
-### Slice 3d: browsing by date and booking cut-off
+### Slice 3d: browsing by date
 - [AC-80] [ui] Given sessions on several days, when `/labs?date=YYYY-MM-DD` is opened, then it shows the sessions on that day, a heading naming the day, links to the previous and next day, and a labelled date field that shows another day.
 - [AC-81] [http] Given a `date` that is not a valid `YYYY-MM-DD` date, when `/labs` is opened with it, then the response is 400 with "Please choose a valid date.".
 - [AC-82] [ui] Given a day other than today with no session, when `/labs?date=` shows it, then it reads "No labs on this day".
-- [AC-83] [http][db] Given a session that has started, when a student POSTs a booking for it, then the response is 409 with "Booking is closed: this session has already started." and no row is created, and `/labs` shows its button disabled as "Closed".
-- [AC-84] [http][db] Given a session tomorrow with a free place, when a student books it, then the booking succeeds and `bookings` has one row for it.
 
 ### Slice 3e: CSRF protection
 - [AC-85] [http][db] Given a signed-in user, when they POST to book, add a lab, add a session, cancel, delete or sign out without the CSRF token or with a wrong one, then the response is 403 with "This page has expired. Please reload it and try again." and nothing changes.
@@ -234,35 +234,44 @@ The pages:
 ## Retired criteria
 - AC-16 (lowering a lab's limit): there is no lab-editing feature.
 - AC-44 (booking confirmation without reload): merged into AC-4.
-- AC-48 (a lab whose time period does not include today cannot be booked): replaced in Slice 3d by AC-83 and AC-84. Booking is no longer limited to today; it closes when the session starts. Its tests are renamed when Slice 3d replaces them.
+- AC-48 (a lab whose time period does not include today cannot be booked): replaced in Slice 3b by AC-83 and AC-84. Booking is no longer limited to today; it closes when the session starts. Its tests were replaced by AC-83 and AC-84 tests in Slice 3b.
 
 ## Traceability
 <!-- Filled in from Exercise 3 onward: each AC id, and the test that names it. -->
 | Criterion | Test |
 | --- | --- |
-| AC-10 | `TestListTodayFreePlacesAreLimitMinusBookings_AC10`, `TestAC10_LabCardsShowTitleDescriptionPeriodAndFreePlaces`, `TestAC10_DB_LabsShowFreePlacesFromBookingsRows` |
-| AC-23 | `TestAC23_NoLabTodayShowsEmptyState`, `TestAC23_DB_NoLabTodayShowsEmptyState` |
-| AC-12 | `TestAddLabCreatesOneLab_AC12`, `TestAddLabAcceptsAPlaceLimitOfOne_AC12`, `TestAC12_StaffAddsLabAndItAppearsOnLabs`, `TestAC12_DB_StaffAddsLabAndLabsGainsOneRow` |
+| AC-10 | `TestAC10_DB_LabsShowFreePlacesFromBookingsRows`, `TestAC10_LabCardsShowTitleDescriptionPeriodAndFreePlaces`, `TestListTodayFreePlacesAreLimitMinusBookings_AC10` |
+| AC-23 | `TestAC23_DB_NoLabTodayShowsEmptyState`, `TestAC23_NoLabTodayShowsEmptyState` |
+| AC-12 | `TestAC12_DB_StaffAddsLabAndLabsGainsOneRow`, `TestAC12_StaffAddsLabAndItAppearsOnLabs`, `TestAddLabAcceptsAPlaceLimitOfOne_AC12`, `TestAddLabCreatesOneLab_AC12` |
 | AC-13 | `TestAddLabRejectsBadPlaceLimit_AC13`, `TestAC13_BadPlaceLimitShowsMessageAndCreatesNothing`, `TestAC13_DB_BadPlaceLimitCreatesNoRow` |
 | AC-2 | `TestAddLabDuplicateTitleIsConflict_AC2`, `TestAC2_DuplicateTitleIs409`, `TestAC2_DB_DuplicateTitleIs409AndNoRow` |
-| AC-14 | `TestLabBookingsListsExactlyTheBookers_AC14`, `TestAC14_StaffSeesBookersTable`, `TestAC14_DB_StaffSeesExactlyTheStudentsWhoBooked` |
+| AC-14 | `TestAC14_DB_StaffSeesAStudentWhoBookedThroughTheApp`, `TestAC14_DB_StaffSeesExactlyTheStudentsWhoBooked`, `TestAC14_StaffSeesBookersTable`, `TestLabBookingsListsExactlyTheBookers_AC14`, `TestLabBookingsListsPastSessionsMostRecentFirst_AC14` |
 | AC-15 | `TestAddLabStudentIsForbidden_AC15`, `TestRequireStaff_AC15`, `TestNewLabFormIsForStaffOnly_AC15`, `TestAC15_StudentGetAndPostNewLabAre403`, `TestAC15_StudentPostOfNewLabIs403WithoutHandlerRoleCheck`, `TestAC15_DB_StudentGetsAndPosts403AndNoRow` |
 | AC-45 | `TestLabBookingsStudentIsForbidden_AC45`, `TestAC45_StudentGetsStaffLabPage403`, `TestAC45_DB_StudentGetsStaffLabPage403` |
-| AC-4 | `TestBookTakesOnePlace_AC4`, `TestAC4_ScriptBookingConfirmsAndReturnsTheNewCount`, `TestAC4_FormBookingRedirectsToTheLabWithConfirmation`, `TestAC4_BookingScriptIsServedAndLoaded`, `TestAC4_DB_BookingAddsExactlyOneRowAndLowersTheCount` |
-| AC-5 | `TestBookTwiceIsAlreadyBooked_AC5`, `TestAC5_SecondBookingIs409`, `TestAC5_DB_SecondBookingIs409AndLeavesOneRow`, `TestBookLabReportsAMissingLabAndADuplicate_AC47_AC5` |
-| AC-1 | `TestBookFullLabIsRefused_AC1`, `TestAC1_FullLabIs409WithLinksToTheListAndHome`, `TestAC1_DB_FullLabIs409AndCreatesNoRow` |
-| AC-8 | `TestAC8_FullLabShowsADisabledFullButtonAndRefusesAPost`, `TestAC8_DB_FullLabShowsFullAndRefusesAPost` |
-| AC-6 | `TestBookTheLastPlaceThenFull_AC6`, `TestAC6_DB_BookLabHoldsTheLabLockWhileTheCheckRuns`, `TestAC6_DB_ConcurrentBookingsOfTheLastPlaceLetExactlyOneThrough` |
-| AC-46 | `TestRequireStudent_AC46`, `TestBookByStaffIsForbidden_AC46`, `TestAC46_StaffBookingIs403`, `TestAC46_DB_StaffBookingIs403AndCreatesNoRow` |
-| AC-47 | `TestBookUnknownLabIsNotFound_AC47`, `TestGetLabShowsFreePlaces_AC47`, `TestAC47_UnknownLabIs404`, `TestAC47_DB_UnknownLabIs404AndCreatesNoRow`, `TestBookLabReportsAMissingLabAndADuplicate_AC47_AC5` |
-| AC-48 (retired) | `TestBookLabNotAvailableTodayIsRefused_AC48`, `TestAC48_LabNotAvailableTodayIsRefused`, `TestAC48_DB_LabNotAvailableTodayIsRefusedAndCreatesNoRow` |
-| AC-19 | `TestBookWithoutCallerIsUnauthenticated_AC19`, `TestAC19_BookingWithoutSessionIs401`, `TestAC19_ScriptBookingWithoutSessionIs401`, `TestAC19_DB_BookingWithoutSessionIs401AndBookingsUnchanged` |
+| AC-4 | `TestAC4_BookingScriptIsServedAndLoaded`, `TestAC4_DB_BookingAddsExactlyOneRowAndLowersTheCount`, `TestAC4_FormBookingRedirectsToTheLabWithConfirmation`, `TestAC4_ScriptBookingConfirmsAndReturnsTheNewCount`, `TestBookTakesOnePlace_AC4` |
+| AC-5 | `TestAC5_DB_SecondBookingIs409AndLeavesOneRow`, `TestAC5_SecondBookingIs409`, `TestBookSessionReportsAMissingSessionAndADuplicate_AC47_AC5`, `TestBookTwiceIsAlreadyBooked_AC5` |
+| AC-1 | `TestAC1_DB_FullLabIs409AndCreatesNoRow`, `TestAC1_FullLabIs409WithLinksToTheListAndHome`, `TestBookFullLabIsRefused_AC1` |
+| AC-8 | `TestAC8_DB_FullLabShowsFullAndRefusesAPost`, `TestAC8_FullLabShowsADisabledFullButtonAndRefusesAPost` |
+| AC-6 | `TestAC6_DB_BookSessionHoldsTheSessionLockWhileTheCheckRuns`, `TestAC6_DB_ConcurrentBookingsOfTheLastPlaceLetExactlyOneThrough`, `TestBookTheLastPlaceThenFull_AC6` |
+| AC-46 | `TestAC46_DB_StaffBookingIs403AndCreatesNoRow`, `TestAC46_StaffBookingIs403`, `TestBookByStaffIsForbidden_AC46`, `TestRequireStudent_AC46` |
+| AC-47 | `TestAC47_DB_UnknownLabIs404AndCreatesNoRow`, `TestAC47_UnknownLabIs404`, `TestBookSessionReportsAMissingSessionAndADuplicate_AC47_AC5`, `TestBookUnknownSessionIsNotFound_AC47`, `TestGetLabShowsFreePlaces_AC47` |
+| AC-48 (retired) | Replaced by AC-83 and AC-84 in Slice 3b; its three tests were removed with the "today only" rule. |
+| AC-19 | `TestAC19_BookingWithoutSessionIs401`, `TestAC19_DB_BookingWithoutSessionIs401AndBookingsUnchanged`, `TestAC19_ScriptBookingWithoutSessionIs401`, `TestBookWithoutCallerIsUnauthenticated_AC19` |
 | AC-60 | `TestAddLabStoresTheCallerAsOwner_AC60`, `TestAC60_DB_AddedLabIsOwnedByTheStaffMember`, `TestAC60_DB_MigrationGivesExistingLabsTheFirstStaffAccount`, `TestAC60_DB_LabsMustHaveAnExistingOwner`, `TestDemoLabsAreOwnedByStaffFromThreeAccounts_AC60` |
 | AC-61 | `TestLabsShowTheirOwnersName_AC61`, `TestAC61_LabsShowTheirOwner` |
-| AC-62 | `TestMyLabsListsOnlyTheCallersLabs_AC62`, `TestAC62_MyLabsListsExactlyTheCallersLabs`, `TestAC62_CardTitlesLinkStaffToTheirOwnLabsOnly`, `TestAC62_HeaderLinksStaffToMyLabs`, `TestAC62_DB_EachStaffMemberSeesOnlyTheirOwnLabs` |
+| AC-62 | `TestAC62_CardTitlesLinkStaffToTheirOwnLabsOnly`, `TestAC62_DB_EachStaffMemberSeesOnlyTheirOwnLabs`, `TestAC62_HeaderLinksStaffToMyLabs`, `TestAC62_MyLabsListsExactlyTheCallersLabs`, `TestMyLabsListsOnlyTheCallersLabs_AC62`, `TestMyLabsShowsTheNextSessionOrNone_AC62`, `TestSessionsBetweenAndMyLabsNextSession_AC62` |
 | AC-63 | `TestMyLabsIsEmptyForStaffWhoOwnNothing_AC63`, `TestAC63_MyLabsWithoutLabsShowsTheEmptyState` |
 | AC-64 | `TestRequireOwner_AC64`, `TestLabBookingsAreForTheOwnerOnly_AC64`, `TestAC64_AnotherStaffMembersLabIs403`, `TestAC64_DB_AnotherStaffMembersLabIs403` |
 | AC-65 | `TestMyLabsIsForStaffOnly_AC65`, `TestAC65_StudentGetsMyLabs403` |
+| AC-66 | `TestAC66_DB_MigrationDownRefusesALabWithTwoSessions`, `TestAC66_DB_MigrationMakesEachLabsPeriodItsOneSession` |
+| AC-67 | `TestAC67_DB_AddSessionsAddsRowsForTheLab`, `TestAC67_DB_OwnerAddsASessionAndAStudentBooksIt`, `TestAC67_OwnerAddsASessionAndItIsListed`, `TestAC67_StaffPageGroupsSessionsByDayWithTheirOwnBookers`, `TestAddSessionAddsOneSession_AC67`, `TestAddSessionMayRunPastMidnight_AC67`, `TestDemoHasALabThatRunsWeekly_AC67` |
+| AC-68 | `TestAC68_BadSessionFormIsShownAgainWithItsMessage`, `TestAddSessionRejectsABadForm_AC68` |
+| AC-69 | `TestAC69_DB_OverlappingSessionIs409AndAddsNothing`, `TestAC69_DB_OverlappingSessionIsRefused`, `TestAC69_DB_TwoOverlappingSessionsAddedAtOnceGiveExactlyOne`, `TestAC69_OverlappingSessionIs409`, `TestAddSessionOverlappingAnotherIsConflict_AC69` |
+| AC-70 | `TestAC70_DB_AddSessionsIsAllOrNone`, `TestAC70_WeeklyRepeatAddsOneSessionPerWeek`, `TestAddSessionRepeatKeepsTheLocalTimeAcrossADaylightSavingChange_AC70`, `TestAddSessionRepeatThatClashesAddsNone_AC70`, `TestAddSessionRepeatsWeeklyUpToTheDate_AC70` |
+| AC-71 | `TestAC71_DB_EachSessionCountsItsOwnBookings`, `TestBookTwoSessionsOfOneLabCountSeparately_AC71` |
+| AC-72 | `TestAC72_DB_AnotherStaffMemberCannotAddSessions`, `TestAC72_OnlyTheOwnerMayAddSessions`, `TestAddSessionIsForTheLabsOwnerOnly_AC72` |
+| AC-83 | `TestAC83_DB_StartedSessionIsRefusedAndCreatesNoRow`, `TestAC83_StartedSessionShowsClosedAndRefusesABooking`, `TestBookSessionThatStartedIsRefused_AC83`, `TestListTodayMarksStartedSessions_AC83` |
+| AC-84 | `TestAC84_DB_SessionTomorrowCanBeBooked`, `TestAC84_SessionTomorrowCanBeBooked`, `TestBookSessionTomorrowSucceeds_AC84` |
 
 ## Spec vs result
 <!-- After the agent builds the slice: which criteria passed, which it missed or reinterpreted, and what you changed in this spec because of it. -->
@@ -331,7 +340,7 @@ New features were discussed and added as Slices 3a–3e, before Slices 4–7 bui
 - Labs get an owner, and owner-only staff pages: "My labs" and one owned lab (AC-60–65). Until now every staff member could see every lab's booking list, and a lab outside today could only be found again through the redirect after adding it.
 - A lab and its schedule are separate: a lab has many sessions, added as a list with an optional weekly repeat, never overlapping (AC-66–72). A calendar grid was rejected: too much plain JavaScript for 375 px and keyboard use.
 - Staff cancel sessions instead of deleting booked labs, so a student can see the cancellation without notifications; a lab can be deleted only while nobody has booked it (AC-73–79).
-- Booking is no longer limited to today: students browse by date, and booking closes when the session starts (AC-80–84). AC-48 is retired.
+- Booking is no longer limited to today: students browse by date (AC-80–82), and booking closes when the session starts (AC-83, AC-84; moved into Slice 3b when it was planned, since 3b rewrites the booking rule anyway). AC-48 is retired.
 - CSRF tokens on every form that changes something, now that staff can delete and cancel (AC-85–87). This reverses the Slice 3 decision to rely on `SameSite=Lax` alone.
 - Gaps closed in Slice 4: the "Booked" state after a reload, cancelled sessions on `/bookings`, and no cancelling after a session starts (AC-88–90). MCP: owner-only booking lists (AC-91), and two new tools, `schedule_session` and `cancel_session`, so staff can manage sessions through MCP as on the web pages (AC-92–94; AC-24 and AC-39 now count nine tools). Lab editing stays a non-goal.
 - The decisions and the retired criteria moved out of the acceptance-criteria section, which the spec self-check read as criteria without an id.
@@ -359,3 +368,35 @@ Decisions taken while building it:
 
 What changed in this spec because of it:
 - Architecture: the trace names the owner and `RequireOwner`. The fixed handler-side role check is replaced, as the one place where the code does not match the layering, by `seed.Demo` booking through the store and skipping the service's rules.
+
+### Slice 3b (checked 2026-11-17)
+Checked with `go test ./...` against the in-memory store and a real `labwiz_test` database (no test skipped), `go test -race` on the booking and overlap tests, by breaking the lock and the overlap constraint on purpose, by migrating the development database, and by reading the code. Service coverage stays at 100%.
+
+| Criterion | Result | Notes |
+| --- | --- | --- |
+| AC-66 | Passed | Migration `000004_lab_sessions` makes each lab's period its one session and moves every booking onto it. A store test runs it from version 3 with two labs and three bookings and back down; the development database went from 15 labs and 13 bookings to 15 sessions with all 13 bookings. The down migration refuses a lab with other than one session; that test runs the real down file in a rolled-back transaction, so the shared test database is not left dirty. |
+| AC-67 | Passed | The owner's staff page has the add-session form. Sessions may run past midnight. A new lab appears on `/labs` only once it has a session that day. |
+| AC-68 | Passed | Nine kinds of bad form in the service; over HTTP the page comes back with the message, the typed values and its booking lists. |
+| AC-69 | Passed | The exclusion constraint decides. Four overlapping sessions added at once leave exactly one. Dropping the constraint on the test database made the AC-69 and AC-70 tests fail; restoring it made them pass. A cancelled session no longer blocks its time (for Slice 3c). |
+| AC-70 | Passed | One session per week up to and including the date, at most 26, all or none. Weekly copies keep their local time across a daylight saving change (Europe/Kyiv, 25 Oct 2026). |
+| AC-71 | Passed | Free places and the unique booking are per session: one student can book two sessions of one lab. |
+| AC-72 | Passed | `AddSessions` runs the same owner check as the booking list. |
+| AC-83, AC-84 | Passed, moved from Slice 3d | Any future session can be booked until it starts; a started session shows a disabled "Closed" and a POST is 409. |
+| AC-6 | Passed, re-checked | The lock moved from the lab's row to the session's. Removing `FOR UPDATE OF s` made the store race test fail 2 of 2 (5 bookings for 1 place). |
+| AC-12, AC-14 | Passed, reworded | AC-12 no longer has a time period; AC-14 lists bookers per session. |
+| AC-29, AC-41 | Untested by hand | The staff page's new form and the session lists at 375 px and by keyboard. AC-41's test now also checks the session form's labels. |
+
+Decisions taken while building it:
+- `cancelled_at` is in the table from the start, so the overlap constraint is written once; Slice 3c only sets it.
+- `bookings.session_id` is `ON DELETE RESTRICT`: a session with bookings cannot disappear, which Slice 3c relies on to refuse deleting a booked lab.
+- The handler tests' fixed clock moved from 10:00 to 08:30, so the seeded 09:00 session is still open and the 08:00–20:00 one has started. The service tests keep 10:00.
+- Database tests ask explicitly for a seeded lab's id or its session's id: in a fresh test database they happen to be equal, and tests that mix them up would still pass.
+- An unknown session gives "This session does not exist." (404); the booking sentences still say "lab", which is what a student books.
+
+What went wrong:
+- Step 1 created `internal/store/sessions.go` over the existing file of the same name, which held the sign-in session queries. The store tests did not use them, so the step looked green while the server did not build. It was found in step 3, restored from git unchanged, and the lab-session code now lives in `lab_sessions.go`. Nothing broken was committed, because the steps were not committed one by one.
+
+What changed in this spec because of it:
+- AC-83 and AC-84 moved from Slice 3d to 3b; 3d is only browsing by date.
+- The UI line for the add-session form, AC-12, AC-14 and AC-67 match what was built.
+- The Architecture section traces adding a session and booking a session.
