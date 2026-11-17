@@ -31,6 +31,8 @@ var (
 	ErrTitleRequired     = &Error{KindValidation, "Please enter a title."}
 	ErrTitleTooLong      = &Error{KindValidation, "The title must be 200 characters or fewer."}
 	ErrInvalidPlaceLimit = &Error{KindValidation, "The place limit must be a whole number of 1 or more."}
+	// ErrInvalidDate is a ?date= on /labs that is not a real YYYY-MM-DD day (AC-81).
+	ErrInvalidDate = &Error{KindValidation, "Please choose a valid date."}
 
 	// Booking a session. The sentences still say "lab": that is what a student books (AC-1, AC-5).
 	ErrSessionNotFound = &Error{KindNotFound, "This session does not exist."}

@@ -96,25 +96,58 @@ func freePlaces(v store.SessionView) int {
 	return max(v.PlaceLimit-v.Booked, 0)
 }
 
-// today is [midnight, next midnight) in the server's timezone (SPEC decisions).
-func (l *Labs) today() (from, to time.Time) {
-	t := l.now().In(l.loc)
-	from = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, l.loc)
-	return from, from.AddDate(0, 0, 1)
+// midnight is the start of t's calendar day in the server's timezone ("today" in SPEC's decisions).
+func (l *Labs) midnight(t time.Time) time.Time {
+	t = t.In(l.loc)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, l.loc)
 }
 
-// ListToday returns the sessions whose time period includes part of today, each with its lab and free
-// places (AC-10). Any signed-in user may call it.
-func (l *Labs) ListToday(ctx context.Context, caller Caller) ([]SessionCard, error) {
+// DayList is the lab list for one day (AC-80).
+type DayList struct {
+	// Day is the shown day's midnight in the server's timezone.
+	Day   time.Time
+	Today bool
+	// Date, Prev and Next are the shown, previous and next day as YYYY-MM-DD, for links and the date field.
+	Date, Prev, Next string
+	Sessions         []SessionCard
+}
+
+// ListDay returns the sessions whose time period includes part of one day, today when date is empty,
+// each with its lab and free places (AC-10, AC-80). Any signed-in user may call it. A date that is not
+// a real YYYY-MM-DD day gives ErrInvalidDate (AC-81).
+func (l *Labs) ListDay(ctx context.Context, caller Caller, date string) (DayList, error) {
 	if caller.ID == 0 {
-		return nil, ErrUnauthenticated
+		return DayList{}, ErrUnauthenticated
 	}
-	from, to := l.today()
-	views, err := l.store.SessionsBetween(ctx, from, to)
+	today := l.midnight(l.now())
+	day := today
+	if date != "" {
+		d, err := time.ParseInLocation(DateLayout, date, l.loc)
+		if err != nil {
+			return DayList{}, ErrInvalidDate
+		}
+		day = d
+	}
+	// AddDate, not 24 hours: a day with a daylight saving change is 23 or 25 hours long.
+	next := day.AddDate(0, 0, 1)
+	views, err := l.store.SessionsBetween(ctx, day, next)
 	if err != nil {
-		return nil, fmt.Errorf("list sessions: %w", err)
+		return DayList{}, fmt.Errorf("list sessions: %w", err)
 	}
-	return l.cards(views), nil
+	return DayList{
+		Day:      day,
+		Today:    day.Equal(today),
+		Date:     day.Format(DateLayout),
+		Prev:     day.AddDate(0, 0, -1).Format(DateLayout),
+		Next:     next.Format(DateLayout),
+		Sessions: l.cards(views),
+	}, nil
+}
+
+// ListToday returns today's sessions: ListDay without a date.
+func (l *Labs) ListToday(ctx context.Context, caller Caller) ([]SessionCard, error) {
+	list, err := l.ListDay(ctx, caller, "")
+	return list.Sessions, err
 }
 
 // lab looks a lab up and turns a missing one into ErrLabNotFound (AC-47).
