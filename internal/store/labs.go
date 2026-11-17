@@ -13,6 +13,7 @@ import (
 const (
 	pgUniqueViolation     = "23505"
 	pgForeignKeyViolation = "23503"
+	pgRestrictViolation   = "23001"
 	pgExclusionViolation  = "23P01"
 )
 

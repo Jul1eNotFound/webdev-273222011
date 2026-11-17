@@ -37,6 +37,13 @@ var (
 	ErrLabFull         = &Error{KindConflict, "This lab is full."}
 	ErrAlreadyBooked   = &Error{KindConflict, "You have already booked this lab."}
 	ErrSessionStarted  = &Error{KindConflict, "Booking is closed: this session has already started."}
+	// ErrSessionCancelled refuses booking a session its owner cancelled (AC-74).
+	ErrSessionCancelled = &Error{KindConflict, "This session has been cancelled."}
+
+	// Cancelling sessions and deleting labs (AC-75, AC-77).
+	ErrCancelStarted    = &Error{KindConflict, "This session has already started."}
+	ErrAlreadyCancelled = &Error{KindConflict, "This session is already cancelled."}
+	ErrLabHasBookings   = &Error{KindConflict, "This lab has bookings. Cancel its sessions instead."}
 
 	// Scheduling sessions (AC-68 to AC-70).
 	ErrInvalidPeriod     = &Error{KindValidation, "Please enter a valid start and end time."}

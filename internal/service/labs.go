@@ -21,6 +21,9 @@ type LabStore interface {
 	SessionBookers(ctx context.Context, labID int64) ([]store.SessionBooker, error)
 	AddSessions(ctx context.Context, labID int64, periods []store.Period) ([]int64, error)
 	BookSession(ctx context.Context, userID, sessionID int64, check store.BookingCheck) (store.SessionView, error)
+	SessionByID(ctx context.Context, id int64) (store.SessionView, error)
+	CancelSession(ctx context.Context, sessionID int64, now time.Time, check store.CancelCheck) (store.SessionView, error)
+	DeleteLab(ctx context.Context, labID int64) error
 }
 
 // DateTimeLayout is how a session's start and end are typed: the value of an HTML datetime-local input.

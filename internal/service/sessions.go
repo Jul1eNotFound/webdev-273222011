@@ -26,6 +26,8 @@ type NewSession struct {
 type SessionBookers struct {
 	SessionCard
 	Bookers []store.Booker
+	// Cancellable is true while the owner may still cancel it: not cancelled and not started (AC-75).
+	Cancellable bool
 }
 
 // StaffLabPage is what the owner sees on /staff/labs/{id}: the lab, its sessions that have not ended in
@@ -34,6 +36,8 @@ type StaffLabPage struct {
 	Lab      store.Lab
 	Upcoming []SessionBookers
 	Past     []SessionBookers
+	// Deletable is true while no session of the lab has a booking, past and cancelled ones included (AC-77).
+	Deletable bool
 }
 
 // ownLab looks a lab up for the caller, who must be its owner (AC-64, AC-72). The role is checked
@@ -70,9 +74,10 @@ func (l *Labs) Bookings(ctx context.Context, caller Caller, id int64) (StaffLabP
 	for _, b := range bookers {
 		bySession[b.SessionID] = append(bySession[b.SessionID], b.Booker)
 	}
-	page := StaffLabPage{Lab: lab}
+	page := StaffLabPage{Lab: lab, Deletable: len(bookers) == 0}
 	for _, v := range views {
-		s := SessionBookers{SessionCard: l.card(v), Bookers: bySession[v.SessionID]}
+		c := l.card(v)
+		s := SessionBookers{SessionCard: c, Bookers: bySession[v.SessionID], Cancellable: !c.Cancelled && !c.Started}
 		if v.EndsAt.After(l.now()) {
 			page.Upcoming = append(page.Upcoming, s)
 		} else {
@@ -160,6 +165,8 @@ func (l *Labs) Book(ctx context.Context, caller Caller, sessionID int64) (Sessio
 	now := l.now()
 	v, err := l.store.BookSession(ctx, caller.ID, sessionID, func(s store.SessionView, mine bool) error {
 		switch {
+		case s.CancelledAt != nil:
+			return ErrSessionCancelled // AC-74
 		case mine:
 			return ErrAlreadyBooked // AC-5
 		case !now.Before(s.StartsAt):
@@ -181,4 +188,100 @@ func (l *Labs) Book(ctx context.Context, caller Caller, sessionID int64) (Sessio
 		return SessionCard{}, ErrAlreadyBooked
 	}
 	return SessionCard{}, fmt.Errorf("book session: %w", err)
+}
+
+// cancelCheck refuses cancelling a session that is already cancelled or has started (AC-75), and lets only
+// its lab's owner do it (AC-79).
+func (l *Labs) cancelCheck(caller Caller, now time.Time) store.CancelCheck {
+	return func(v store.SessionView) error {
+		if err := RequireOwner(caller, store.Lab{ID: v.LabID, OwnerID: v.OwnerID}); err != nil {
+			return err
+		}
+		switch {
+		case v.CancelledAt != nil:
+			return ErrAlreadyCancelled
+		case !now.Before(v.StartsAt):
+			return ErrCancelStarted
+		}
+		return nil
+	}
+}
+
+// CancelPage returns the session the owner is about to cancel, for the confirmation page (AC-76). It
+// refuses what CancelSession would refuse, so the page never offers an impossible action.
+func (l *Labs) CancelPage(ctx context.Context, caller Caller, sessionID int64) (SessionCard, error) {
+	if err := RequireStaff(caller); err != nil {
+		return SessionCard{}, err
+	}
+	v, err := l.store.SessionByID(ctx, sessionID)
+	if errors.Is(err, store.ErrNotFound) {
+		return SessionCard{}, ErrSessionNotFound
+	}
+	if err != nil {
+		return SessionCard{}, fmt.Errorf("look up session: %w", err)
+	}
+	if err := l.cancelCheck(caller, l.now())(v); err != nil {
+		return SessionCard{}, err
+	}
+	return l.card(v), nil
+}
+
+// CancelSession cancels an upcoming session for its lab's owner (AC-73, AC-79). Its bookings are kept, so
+// the students see the cancellation. The check runs while the session is locked, the same lock a booking
+// takes, so no booking gets in after the cancel (AC-74).
+func (l *Labs) CancelSession(ctx context.Context, caller Caller, sessionID int64) (SessionCard, error) {
+	if err := RequireStaff(caller); err != nil {
+		return SessionCard{}, err
+	}
+	now := l.now()
+	v, err := l.store.CancelSession(ctx, sessionID, now, l.cancelCheck(caller, now))
+	var se *Error
+	switch {
+	case err == nil:
+		return l.card(v), nil
+	case errors.As(err, &se):
+		return SessionCard{}, err
+	case errors.Is(err, store.ErrNotFound):
+		return SessionCard{}, ErrSessionNotFound
+	}
+	return SessionCard{}, fmt.Errorf("cancel session: %w", err)
+}
+
+// DeletePage returns the lab the owner is about to delete with its sessions, for the confirmation page
+// (AC-76). It refuses a lab that has any booking, as DeleteLab would (AC-77).
+func (l *Labs) DeletePage(ctx context.Context, caller Caller, labID int64) (LabPage, error) {
+	lab, err := l.ownLab(ctx, caller, labID)
+	if err != nil {
+		return LabPage{}, err
+	}
+	views, err := l.store.SessionsOfLab(ctx, labID)
+	if err != nil {
+		return LabPage{}, fmt.Errorf("list sessions: %w", err)
+	}
+	page := LabPage{Lab: lab, Sessions: l.cards(views)}
+	for _, s := range page.Sessions {
+		if s.Booked > 0 {
+			return LabPage{}, ErrLabHasBookings
+		}
+	}
+	return page, nil
+}
+
+// DeleteLab deletes a lab nobody has booked, with its sessions, for its owner (AC-77, AC-79). The database
+// decides whether it has bookings, so a booking made while the delete runs is never lost (AC-78).
+func (l *Labs) DeleteLab(ctx context.Context, caller Caller, labID int64) (store.Lab, error) {
+	lab, err := l.ownLab(ctx, caller, labID)
+	if err != nil {
+		return store.Lab{}, err
+	}
+	err = l.store.DeleteLab(ctx, labID)
+	switch {
+	case errors.Is(err, store.ErrInUse):
+		return store.Lab{}, ErrLabHasBookings
+	case errors.Is(err, store.ErrNotFound):
+		return store.Lab{}, ErrLabNotFound // deleted since the lookup
+	case err != nil:
+		return store.Lab{}, fmt.Errorf("delete lab: %w", err)
+	}
+	return lab, nil
 }

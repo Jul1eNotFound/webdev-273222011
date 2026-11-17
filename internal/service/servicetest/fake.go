@@ -31,6 +31,7 @@ type Store struct {
 	// ErrLabs makes SessionsBetween fail: the query behind the lab list.
 	ErrLabs, ErrCreateLab, ErrLabByID, ErrLabsOwnedBy                   error
 	ErrSessionsOfLab, ErrSessionBookers, ErrAddSessions, ErrBookSession error
+	ErrSessionByID, ErrCancelSession, ErrDeleteLab                      error
 
 	// booked holds the (user id, session id) pairs booked through BookSession, like the unique
 	// constraint on bookings.
@@ -355,4 +356,57 @@ func (s *Store) BookSession(_ context.Context, userID, sessionID int64, check st
 	s.Bookers[sessionID] = append(s.Bookers[sessionID], b)
 	v.Booked++
 	return v, nil
+}
+
+func (s *Store) SessionByID(_ context.Context, id int64) (store.SessionView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrSessionByID != nil {
+		return store.SessionView{}, s.ErrSessionByID
+	}
+	for _, x := range s.LabSessions {
+		if x.ID == id {
+			return s.view(x), nil
+		}
+	}
+	return store.SessionView{}, store.ErrNotFound
+}
+
+// CancelSession holds the mutex throughout, so it is as atomic as the real store's locked transaction.
+func (s *Store) CancelSession(_ context.Context, sessionID int64, now time.Time, check store.CancelCheck) (store.SessionView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrCancelSession != nil {
+		return store.SessionView{}, s.ErrCancelSession
+	}
+	i := slices.IndexFunc(s.LabSessions, func(x LabSession) bool { return x.ID == sessionID })
+	if i < 0 {
+		return store.SessionView{}, store.ErrNotFound
+	}
+	if err := check(s.view(s.LabSessions[i])); err != nil {
+		return store.SessionView{}, err
+	}
+	s.LabSessions[i].CancelledAt = &now
+	return s.view(s.LabSessions[i]), nil
+}
+
+// DeleteLab refuses a lab whose sessions have any booker, like the RESTRICT key on bookings, and otherwise
+// removes the lab and its sessions, like ON DELETE CASCADE.
+func (s *Store) DeleteLab(_ context.Context, labID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrDeleteLab != nil {
+		return s.ErrDeleteLab
+	}
+	if _, ok := s.lab(labID); !ok {
+		return store.ErrNotFound
+	}
+	for _, x := range s.LabSessions {
+		if x.LabID == labID && len(s.Bookers[x.ID]) > 0 {
+			return store.ErrInUse
+		}
+	}
+	s.Labs = slices.DeleteFunc(s.Labs, func(l store.Lab) bool { return l.ID == labID })
+	s.LabSessions = slices.DeleteFunc(s.LabSessions, func(x LabSession) bool { return x.LabID == labID })
+	return nil
 }
