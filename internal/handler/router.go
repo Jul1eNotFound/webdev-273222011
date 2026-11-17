@@ -46,7 +46,15 @@ func New(d Deps) (http.Handler, error) {
 			}
 			h.fail(w, r, service.ErrUnauthenticated)
 		},
-		Fail: h.fail,
+		// A refused token or a failed lookup: JSON for the booking script, the error page otherwise.
+		Fail: func(w http.ResponseWriter, r *http.Request, err error) {
+			if wantsJSON(r) {
+				h.failJSON(w, r, err)
+				return
+			}
+			h.fail(w, r, err)
+		},
+		CSRF: d.CSRF,
 	}
 
 	r := chi.NewRouter()
@@ -64,10 +72,11 @@ func New(d Deps) (http.Handler, error) {
 	})
 	r.Get("/login", h.loginForm)
 	r.Post("/login", h.login)
-	r.Post("/logout", h.logout)
 
 	r.Group(func(r chi.Router) {
 		r.Use(mw.RequirePage)
+		// Signing out changes something too, so it needs the session and its token (AC-85).
+		r.Post("/logout", h.logout)
 		r.Get("/labs", h.labsPage)
 		r.Get("/labs/{id}", h.labPage)
 		r.Get("/staff/labs", h.myLabsPage)

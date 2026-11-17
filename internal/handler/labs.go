@@ -23,7 +23,7 @@ func (h *handler) labsPage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.page(w, http.StatusOK, "labs", pageData{Title: "Labs · Labwiz", User: &c, Sessions: list.Sessions, Day: &list})
+	h.page(w, r, http.StatusOK, "labs", pageData{Title: "Labs · Labwiz", User: &c, Sessions: list.Sessions, Day: &list})
 }
 
 // labPage shows one lab and its upcoming sessions, each with its free places and, for students, a
@@ -39,7 +39,7 @@ func (h *handler) labPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("booked") == "1" {
 		data.Success = msgBooked
 	}
-	h.page(w, http.StatusOK, "lab", data)
+	h.page(w, r, http.StatusOK, "lab", data)
 }
 
 // bookingReply is what the booking script reads. It is never shown to the user as it is (AC-43).

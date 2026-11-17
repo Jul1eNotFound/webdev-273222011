@@ -15,7 +15,7 @@ func (h *handler) loginForm(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/labs", http.StatusSeeOther)
 		return
 	}
-	h.page(w, http.StatusOK, "login", pageData{Title: loginTitle})
+	h.page(w, r, http.StatusOK, "login", pageData{Title: loginTitle})
 }
 
 func (h *handler) login(w http.ResponseWriter, r *http.Request) {
@@ -27,7 +27,7 @@ func (h *handler) login(w http.ResponseWriter, r *http.Request) {
 	email := r.PostFormValue("email")
 	s, err := h.Auth.Login(r.Context(), email, r.PostFormValue("password"))
 	if errors.Is(err, service.ErrInvalidCredentials) {
-		h.page(w, http.StatusUnauthorized, "login", pageData{Title: loginTitle, Error: err.Error(), Email: email})
+		h.page(w, r, http.StatusUnauthorized, "login", pageData{Title: loginTitle, Error: err.Error(), Email: email})
 		return
 	}
 	if err != nil {

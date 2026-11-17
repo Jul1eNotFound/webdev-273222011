@@ -115,7 +115,7 @@ func TestSessionFormThatCannotBeReadIs400(t *testing.T) {
 	base, st := newStaffApp(t)
 	form := url.Values{"starts": {strings.Repeat("x", 70<<10)}}
 	wantStatus(t, do(t, signedIn(t, base, staffEmail, staffPass), http.MethodPost, base+"/staff/labs/1/sessions", form),
-		http.StatusBadRequest, "The session form could not be read.")
+		http.StatusBadRequest, "The form could not be read. Please try again.")
 	if n := st.SessionCount(1); n != 1 {
 		t.Fatalf("sessions = %d, want 1", n)
 	}

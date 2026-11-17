@@ -24,7 +24,7 @@ func (h *handler) myLabsPage(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("deleted") == "1" {
 		data.Success = "Lab deleted."
 	}
-	h.page(w, http.StatusOK, "my_labs", data)
+	h.page(w, r, http.StatusOK, "my_labs", data)
 }
 
 func (h *handler) newLabForm(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +33,7 @@ func (h *handler) newLabForm(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.page(w, http.StatusOK, "lab_new", pageData{Title: newLabTitle, User: &c})
+	h.page(w, r, http.StatusOK, "lab_new", pageData{Title: newLabTitle, User: &c})
 }
 
 // readForm caps the body and parses a posted form. It answers 400 itself when the form cannot be read.
@@ -69,7 +69,7 @@ func (h *handler) addLab(w http.ResponseWriter, r *http.Request) {
 	lab, err := h.Labs.Add(r.Context(), c, in)
 	if se, ok := formError(err); ok {
 		// Show the form again with what was typed, so nothing is lost (AC-13, AC-2).
-		h.page(w, statusFor(se.Kind), "lab_new", pageData{Title: newLabTitle, User: &c, Error: se.Message, Form: in})
+		h.page(w, r, statusFor(se.Kind), "lab_new", pageData{Title: newLabTitle, User: &c, Error: se.Message, Form: in})
 		return
 	}
 	if err != nil {
@@ -109,7 +109,7 @@ func (h *handler) staffLab(w http.ResponseWriter, r *http.Request, status int, d
 	}
 	data.Title = page.Lab.Title + " sessions · Labwiz"
 	data.Staff = &page
-	h.page(w, status, "lab_staff", data)
+	h.page(w, r, status, "lab_staff", data)
 }
 
 // addSessions adds a session, or a weekly series of them, to the owner's lab (AC-67 to AC-72).

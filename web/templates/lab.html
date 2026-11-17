@@ -12,7 +12,7 @@
   {{range .Sessions}}
   <li class="lab-list__item" data-session="{{.SessionID}}">
     <p class="lab-meta"><span class="lab-card__period" id="session-{{.SessionID}}-title">{{day .StartsAt}}, {{period .StartsAt .EndsAt}}</span> · {{template "freePlaces" .}}</p>
-    {{if not $.User.IsStaff}}{{template "bookForm" .}}{{end}}
+    {{if not $.User.IsStaff}}{{template "bookForm" (bookArgs . $.CSRF)}}{{end}}
   </li>
   {{end}}
 </ul>

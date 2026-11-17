@@ -18,8 +18,10 @@ const msgInternal = "Something went wrong on our side. Please try again."
 
 // pageData is what every template receives. Title must differ per page (AC-42).
 type pageData struct {
-	Title   string
-	User    *service.Caller
+	Title string
+	User  *service.Caller
+	// CSRF is the signed-in session's token for the page's forms and the booking script (AC-87).
+	CSRF    string
 	Error   string
 	Success string
 	Email   string
@@ -48,7 +50,7 @@ type renderer struct {
 // newRenderer takes the timezone that lab times are shown in.
 func newRenderer(loc *time.Location) (*renderer, error) {
 	rn := &renderer{pages: map[string]*template.Template{}}
-	funcs := template.FuncMap{"period": period(loc), "day": day(loc), "longDay": longDay(loc)}
+	funcs := template.FuncMap{"period": period(loc), "day": day(loc), "longDay": longDay(loc), "bookArgs": bookArgs}
 	for _, name := range []string{"login", "labs", "lab", "error", "my_labs", "lab_new", "lab_staff", "confirm"} {
 		t, err := template.New(name).Funcs(funcs).ParseFS(web.FS, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
@@ -76,13 +78,25 @@ func day(loc *time.Location) func(t time.Time) string {
 	return func(t time.Time) string { return t.In(loc).Format("Mon 2 Jan") }
 }
 
+// bookForm is what the Book button's template part gets: the session and the page's CSRF token.
+type bookForm struct {
+	service.SessionCard
+	CSRF string
+}
+
+// bookArgs lets a template pass a session together with the page's token to the bookForm part.
+func bookArgs(s service.SessionCard, csrf string) bookForm {
+	return bookForm{SessionCard: s, CSRF: csrf}
+}
+
 // longDay names the day the lab list shows, as in "Friday 23 October 2026" (AC-80).
 func longDay(loc *time.Location) func(t time.Time) string {
 	return func(t time.Time) string { return t.In(loc).Format("Monday 2 January 2006") }
 }
 
 // page renders into a buffer first, so a template error never sends half a page.
-func (h *handler) page(w http.ResponseWriter, status int, name string, data pageData) {
+func (h *handler) page(w http.ResponseWriter, r *http.Request, status int, name string, data pageData) {
+	data.CSRF = auth.CSRFFrom(r.Context())
 	var buf bytes.Buffer
 	if err := h.rn.pages[name].ExecuteTemplate(&buf, "layout", data); err != nil {
 		h.Log.Error("render page", "page", name, "err", err)
@@ -107,7 +121,7 @@ func (h *handler) errorPage(w http.ResponseWriter, r *http.Request, status int, 
 	if c, ok := auth.CallerFrom(r.Context()); ok {
 		data.User = &c
 	}
-	h.page(w, status, "error", data)
+	h.page(w, r, status, "error", data)
 }
 
 // fail maps a service error to its status. Anything else is logged and shown as a generic 500.

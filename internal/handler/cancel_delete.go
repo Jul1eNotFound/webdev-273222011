@@ -17,7 +17,7 @@ func (h *handler) cancelPage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.page(w, http.StatusOK, "confirm", pageData{Title: "Cancel a session · Labwiz", User: &c, CancelSession: &s})
+	h.page(w, r, http.StatusOK, "confirm", pageData{Title: "Cancel a session · Labwiz", User: &c, CancelSession: &s})
 }
 
 // cancelSession cancels the session and goes back to its lab's staff page (AC-73).
@@ -38,7 +38,7 @@ func (h *handler) deletePage(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.page(w, http.StatusOK, "confirm", pageData{Title: "Delete a lab · Labwiz", User: &c, DeleteLab: &lab})
+	h.page(w, r, http.StatusOK, "confirm", pageData{Title: "Delete a lab · Labwiz", User: &c, DeleteLab: &lab})
 }
 
 // deleteLab deletes the lab and lands on My labs (AC-77).

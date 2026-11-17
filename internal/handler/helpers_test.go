@@ -22,6 +22,32 @@ var fixedNow = time.Date(2026, 10, 22, 8, 30, 0, 0, time.UTC)
 
 func clock() time.Time { return fixedNow }
 
+// testCSRF signs the test server's CSRF tokens, so tests can make the token a page would carry.
+var testCSRF = func() auth.CSRF {
+	c, err := auth.NewCSRF("test-session-secret-at-least-32-characters")
+	if err != nil {
+		panic(err)
+	}
+	return c
+}()
+
+// tokenFor is the CSRF token the server expects from client c, or "" when c is not signed in.
+func tokenFor(c *http.Client, u string) string {
+	if c.Jar == nil {
+		return ""
+	}
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return ""
+	}
+	for _, ck := range c.Jar.Cookies(parsed) {
+		if ck.Name == auth.CookieName {
+			return testCSRF.Token(ck.Value)
+		}
+	}
+	return ""
+}
+
 // newServer serves the app over the given stores, which may be the fake or the real one.
 func newServer(t *testing.T, as service.AuthStore, ls service.LabStore) *httptest.Server {
 	t.Helper()
@@ -29,6 +55,7 @@ func newServer(t *testing.T, as service.AuthStore, ls service.LabStore) *httptes
 		Auth: service.NewAuth(as, auth.Bcrypt{}, clock),
 		Labs: service.NewLabs(ls, clock, time.UTC),
 		Log:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		CSRF: testCSRF,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -61,6 +88,13 @@ func do(t *testing.T, c *http.Client, method, u string, form url.Values) respons
 	t.Helper()
 	var body io.Reader
 	if form != nil {
+		// A POST from a signed-in client carries its session's token, as the page's form would, unless
+		// the test sets csrf itself to send a missing or wrong one (AC-85, AC-86).
+		if method == http.MethodPost && !form.Has("csrf") {
+			if token := tokenFor(c, u); token != "" {
+				form = cloneWith(form, "csrf", token)
+			}
+		}
 		body = strings.NewReader(form.Encode())
 	}
 	req, err := http.NewRequest(method, u, body)
@@ -80,6 +114,15 @@ func do(t *testing.T, c *http.Client, method, u string, form url.Values) respons
 		t.Fatal(err)
 	}
 	return response{res.StatusCode, res.Header, string(b)}
+}
+
+func cloneWith(v url.Values, key, value string) url.Values {
+	out := url.Values{}
+	for k, vs := range v {
+		out[k] = append([]string(nil), vs...)
+	}
+	out.Set(key, value)
+	return out
 }
 
 func signIn(t *testing.T, c *http.Client, base, email, password string) response {

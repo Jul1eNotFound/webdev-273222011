@@ -22,7 +22,7 @@
     <h2 class="lab-card__title" id="session-{{.SessionID}}-title"><a href="{{if eq .OwnerID $.User.ID}}/staff/labs/{{.LabID}}{{else}}/labs/{{.LabID}}{{end}}">{{.Title}}</a></h2>
     {{with .Description}}<p class="lab-card__description">{{.}}</p>{{end}}
     <p class="lab-meta"><span class="lab-card__period">{{period .StartsAt .EndsAt}}</span> · {{template "freePlaces" .}} · {{template "owner" .}}</p>
-    {{if not $.User.IsStaff}}{{template "bookForm" .}}{{end}}
+    {{if not $.User.IsStaff}}{{template "bookForm" (bookArgs . $.CSRF)}}{{end}}
   </li>
   {{end}}
 </ul>

@@ -3,6 +3,7 @@
 {{with .Error}}<p class="message message--error" role="alert">{{.}}</p>{{end}}
 <p>After adding the lab, you schedule its sessions on its page.</p>
 <form method="post" action="/staff/labs/new" class="form">
+  {{template "csrf" $.CSRF}}
   <label for="title">Title</label>
   <input id="title" name="title" type="text" required maxlength="200" value="{{.Form.Title}}">
   <label for="description">Description</label>

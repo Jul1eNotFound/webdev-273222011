@@ -41,6 +41,10 @@ func bookByScript(t *testing.T, c *http.Client, base, path string) bookingReply 
 		t.Fatal(err)
 	}
 	req.Header.Set("Accept", "application/json")
+	// As booking.js does, from the page's meta tag.
+	if token := tokenFor(c, base+path); token != "" {
+		req.Header.Set("X-CSRF-Token", token)
+	}
 	res, err := c.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -132,11 +136,11 @@ func TestAC8_FullLabShowsADisabledFullButtonAndRefusesAPost(t *testing.T) {
 	fillLab(st, 2, 2)
 	c := signedIn(t, base, studentEmail, studentPass)
 	r := do(t, c, http.MethodGet, base+"/labs", nil)
-	full := regexp.MustCompile(`action="/sessions/2/book"[^<]*<button[^>]*disabled>Full</button>`)
+	full := regexp.MustCompile(`action="/sessions/2/book"(?:[^<]|<input type="hidden" name="csrf"[^>]*>)*<button[^>]*disabled>Full</button>`)
 	if !full.MatchString(r.body) {
 		t.Errorf("the full lab has no disabled Full button\n%s", r.body)
 	}
-	open := regexp.MustCompile(`action="/sessions/1/book"[^<]*<button[^>]*>Book</button>`)
+	open := regexp.MustCompile(`action="/sessions/1/book"(?:[^<]|<input type="hidden" name="csrf"[^>]*>)*<button[^>]*>Book</button>`)
 	if !open.MatchString(r.body) {
 		t.Errorf("the lab with free places has no Book button\n%s", r.body)
 	}
@@ -184,7 +188,7 @@ func TestAC83_StartedSessionShowsClosedAndRefusesABooking(t *testing.T) {
 	st.Labs = append(st.Labs, store.Lab{ID: 4, Title: "Open microscopy", PlaceLimit: 5, OwnerID: stellaID})
 	st.LabSessions = append(st.LabSessions, fakeSession(4, 4, 8, 20)) // started at 08:00; the clock says 08:30
 	c := signedIn(t, base, studentEmail, studentPass)
-	closed := regexp.MustCompile(`action="/sessions/4/book"[^<]*<button[^>]*disabled>Closed</button>`)
+	closed := regexp.MustCompile(`action="/sessions/4/book"(?:[^<]|<input type="hidden" name="csrf"[^>]*>)*<button[^>]*disabled>Closed</button>`)
 	for _, path := range []string{"/labs", "/labs/4"} {
 		if r := do(t, c, http.MethodGet, base+path, nil); !closed.MatchString(r.body) {
 			t.Errorf("%s has no disabled Closed button for the started session\n%s", path, r.body)

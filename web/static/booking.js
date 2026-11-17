@@ -6,6 +6,9 @@
   // The server's sentence for a full lab (service.ErrLabFull).
   var FULL = 'This lab is full.';
   var flash = document.getElementById('flash');
+  // The signed-in session's CSRF token, sent with every booking (AC-87).
+  var tokenMeta = document.querySelector('meta[name="csrf-token"]');
+  var token = tokenMeta ? tokenMeta.getAttribute('content') : '';
 
   function link(href, text) {
     var a = document.createElement('a');
@@ -45,7 +48,7 @@
     button.disabled = true;
     button.textContent = 'Booking…';
 
-    fetch(form.action, { method: 'POST', headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+    fetch(form.action, { method: 'POST', headers: { Accept: 'application/json', 'X-CSRF-Token': token }, credentials: 'same-origin' })
       .then(function (res) {
         return res.json()
           .catch(function () { return {}; })

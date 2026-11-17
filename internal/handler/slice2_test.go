@@ -193,7 +193,7 @@ func TestAddLabFormThatCannotBeReadIs400(t *testing.T) {
 	c := signedIn(t, base, staffEmail, staffPass)
 	form := labForm("Optics", "5")
 	form.Set("description", strings.Repeat("x", 70<<10))
-	wantStatus(t, do(t, c, http.MethodPost, base+"/staff/labs/new", form), http.StatusBadRequest, "The lab form could not be read.")
+	wantStatus(t, do(t, c, http.MethodPost, base+"/staff/labs/new", form), http.StatusBadRequest, "The form could not be read. Please try again.")
 	if n := st.LabCount(); n != 3 {
 		t.Fatalf("labs = %d, want 3", n)
 	}

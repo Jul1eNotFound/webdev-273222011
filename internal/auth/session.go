@@ -38,6 +38,23 @@ func TokenFrom(r *http.Request) string {
 
 type callerKey struct{}
 
+type csrfKey struct{}
+
+// CSRFFrom returns the CSRF token RequirePage or RequireAPI put in the context, for the forms of the page.
+func CSRFFrom(ctx context.Context) string {
+	t, _ := ctx.Value(csrfKey{}).(string)
+	return t
+}
+
+// ErrBadToken refuses a change whose CSRF token is missing or wrong (AC-85, AC-86).
+var ErrBadToken = &service.Error{Kind: service.KindForbidden, Message: "This page has expired. Please reload it and try again."}
+
+// ErrUnreadableForm is a change whose form cannot be read, so its token cannot be checked.
+var ErrUnreadableForm = &service.Error{Kind: service.KindValidation, Message: "The form could not be read. Please try again."}
+
+// maxForm is the largest form body read, before any handler sees it.
+const maxForm = 64 << 10
+
 // CallerFrom returns the caller that RequirePage or RequireAPI put in the context.
 func CallerFrom(ctx context.Context) (service.Caller, bool) {
 	c, ok := ctx.Value(callerKey{}).(service.Caller)
@@ -53,8 +70,10 @@ type Middleware struct {
 	Sessions Sessions
 	// Unauthorized is RequireAPI's response when nobody is signed in.
 	Unauthorized http.HandlerFunc
-	// Fail handles any other lookup error.
+	// Fail handles any other lookup error, and a refused CSRF token.
 	Fail func(http.ResponseWriter, *http.Request, error)
+	// CSRF checks the token of every request that changes something (Slice 3e).
+	CSRF CSRF
 }
 
 // RequirePage redirects visitors who are not signed in to /login (AC-9).
@@ -82,6 +101,28 @@ func (m Middleware) require(next http.Handler, unauthorized http.HandlerFunc) ht
 			m.Fail(w, r, err)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), callerKey{}, c)))
+		// Every request that may change something carries the session's CSRF token: in the
+		// X-CSRF-Token header (the booking script) or the csrf form field. Checked here, after the
+		// session, so a visitor who is not signed in still gets 401 or the redirect (AC-19), and before
+		// any handler, so no route can forget it (AC-85).
+		token := TokenFrom(r)
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			got := r.Header.Get("X-CSRF-Token")
+			if got == "" {
+				r.Body = http.MaxBytesReader(w, r.Body, maxForm)
+				if err := r.ParseForm(); err != nil {
+					m.Fail(w, r, ErrUnreadableForm)
+					return
+				}
+				got = r.PostFormValue("csrf")
+			}
+			if !m.CSRF.Valid(token, got) {
+				m.Fail(w, r, ErrBadToken)
+				return
+			}
+		}
+		ctx := context.WithValue(r.Context(), callerKey{}, c)
+		ctx = context.WithValue(ctx, csrfKey{}, m.CSRF.Token(token))
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

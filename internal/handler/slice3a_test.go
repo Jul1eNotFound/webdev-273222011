@@ -139,8 +139,9 @@ func TestMyLabsPageMeetsTheDefinitionOfDone_AC30_AC41_AC42(t *testing.T) {
 	if m := regexp.MustCompile(`(?i)transition|animation|@keyframes`).FindString(r.body); m != "" {
 		t.Errorf("/staff/labs contains %q", m)
 	}
-	if strings.Contains(r.body, "<input") {
-		t.Error("/staff/labs has an input; AC-41 needs it labelled")
+	// A hidden field (the sign-out form's CSRF token) is not something a person fills in, so needs no label.
+	if strings.Count(r.body, "<input") != strings.Count(r.body, `<input type="hidden"`) {
+		t.Error("/staff/labs has a visible input; AC-41 needs it labelled")
 	}
 	title := regexp.MustCompile(`<title>([^<]+)</title>`).FindStringSubmatch(r.body)
 	if title == nil || title[1] != "My labs · Labwiz" || !strings.Contains(r.body, `<html lang="en">`) {

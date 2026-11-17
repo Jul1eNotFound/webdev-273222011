@@ -9,6 +9,7 @@
 <h2>Add a session</h2>
 {{with $.Error}}<p class="message message--error" role="alert">{{.}}</p>{{end}}
 <form method="post" action="/staff/labs/{{.Lab.ID}}/sessions" class="form">
+  {{template "csrf" $.CSRF}}
   <label for="starts">Starts</label>
   <input id="starts" name="starts" type="datetime-local" required value="{{$.SessionForm.Starts}}">
   <label for="ends">Ends</label>

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}}</title>
   <link rel="stylesheet" href="/static/style.css">
+  {{with .CSRF}}<meta name="csrf-token" content="{{.}}">{{end}}
   <script src="/static/booking.js" defer></script>
 </head>
 <body>
@@ -17,6 +18,7 @@
         <a class="button button--secondary" href="/staff/labs/new">Add a lab</a>{{end}}
         <span class="user__name">{{.Name}}</span>
         <form method="post" action="/logout">
+          {{template "csrf" $.CSRF}}
           <button type="submit" class="button button--secondary">Sign out</button>
         </form>
       </div>
@@ -33,15 +35,19 @@
 {{/* The owner of a lab (AC-61). */}}
 {{define "owner"}}<span class="lab-card__owner">Run by {{.OwnerName}}</span>{{end}}
 
+{{/* The CSRF token of the signed-in session, in every form that changes something (AC-87). */}}
+{{define "csrf"}}<input type="hidden" name="csrf" value="{{.}}">{{end}}
+
 {{/* Free places of a service.SessionCard. The booking script rewrites the text after a booking. */}}
 {{define "freePlaces"}}<span class="lab-card__free" data-free-places>{{.FreePlaces}} of {{.PlaceLimit}} places free</span>{{end}}
 
-{{/* The Book button of a service.SessionCard: a real form, so it works without the script too (AC-8).
+{{/* The Book button of a session, given as bookArgs card $.CSRF: a real form, so it works without the script too (AC-8).
      It is disabled as "Closed" once the session has started (AC-83), and as "Full" when no place is left.
      A cancelled session has no form at all, only the word "Cancelled" (AC-73). */}}
 {{define "bookForm"}}
 {{if .Cancelled}}<p class="lab-card__cancelled">Cancelled</p>{{else}}
 <form method="post" action="/sessions/{{.SessionID}}/book" class="book-form">
+  {{template "csrf" .CSRF}}
   {{if .Started}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Closed</button>{{else if gt .FreePlaces 0}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title">Book</button>{{else}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Full</button>{{end}}
 </form>
 {{end}}
