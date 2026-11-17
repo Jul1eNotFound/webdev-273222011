@@ -4,8 +4,8 @@
 lab booking
 
 ## Goals
-- A student signs in, sees free labs and books one that has free places.
-- A staff adds labs with a limit on places and sees who has booked it.
+- A student signs in, browses lab sessions by date and books a session that has free places.
+- A staff member adds labs they own, schedules sessions for them, sees who booked each session, and cancels sessions or deletes labs nobody has booked.
 
 ## Non-goals
 - No multilingual support: only English is supported
@@ -14,15 +14,18 @@ lab booking
 - No animations such as transitions, hover effects or animated loading indicators (a static "Loading…" text is allowed)
 - No booking notifications or reminders for both users and lab owners
 - No auto-refresh of pages
+- No calendar grid: sessions are scheduled and shown as lists grouped by date
+- No editing of a lab or a session after it is created: a session is cancelled and a new one added instead
+- No transfer of a lab to another owner
 
 ## Constraints
 - Golang with Chi, PostgreSQL, plain HTML and JavaScript in the UI.
 - Passwords are stored only as a hash, never as readable text.
 
 ## The model feature
-- Model: Claude Haiku 5.5 (`claude-haiku-5-5`), text in and text out, called from the Go backend through the Anthropic Messages API. The API key is read from an environment variable and never reaches the browser. Feature: natural-language lab search, where a student types something like "a quiet lab tomorrow afternoon with 5 free places" and the model turns it into filters for the existing `/labs` list.
+- Model: Claude Haiku 5.5 (`claude-haiku-5-5`), text in and text out, called from the Go backend through the Anthropic Messages API. The API key is read from an environment variable and never reaches the browser. Feature: natural-language lab search, where a student types something like "a quiet lab tomorrow afternoon with 5 free places" and the model turns it into filters for the existing `/labs` list of sessions.
 - Input: the student's free-text query (max 200 characters) and today's date and timezone. No user data, no emails, and no booking data are sent.
-- Output: a JSON object with optional fields `date_from`, `date_to`, `time_of_day` (morning, afternoon or evening), `min_free_places` and `keywords`. It is requested through a tool schema so the shape is enforced. The server validates it, runs the normal lab-list query with those filters, and shows them as editable chips above the results.
+- Output: a JSON object with optional fields `date_from`, `date_to`, `time_of_day` (morning, afternoon or evening), `min_free_places` and `keywords`. It is requested through a tool schema so the shape is enforced. The server validates it, runs the normal session-list query with those filters, and shows them as editable chips above the results.
 - When it fails:
   - Slow: the call has a 5 second timeout. On timeout, the student sees "Smart search is unavailable, showing all labs" and the unfiltered list.
   - Rate-limited (429) or API error: same fallback message and list. The server retries at most once, honouring `retry-after` if it is under the timeout, and limits each student to 10 searches per minute.
@@ -34,26 +37,31 @@ lab booking
 - Provider: Sign in with Google, the authorization-code flow, on the server.
 - Linking: matched on Google's account id. An address Google has not marked as verified is
   never linked to an existing account.
+- Forms: every form that changes something carries a CSRF token tied to the sign-in session (from Slice 3e). The sign-in form is exempt, since there is no session yet.
 
 ## MCP tools
 | Tool | What it does | Who may call it |
 | --- | --- | --- |
-| list_labs | Lists labs available on a given date (default today), each with title, description, availability time period, place limit and free places. | Any signed-in user |
-| get_lab | Returns one lab by id with its details and free places. For staff it also lists the students who booked it. | Any signed-in user; the booking list is for staff only |
-| book_lab | Books a place in a lab for the calling student. Refused if the lab is full or the student already booked it. | Student |
-| cancel_booking | Cancels the calling student's booking for a lab and frees the place. | Student, own bookings only |
-| my_bookings | Lists the calling student's current bookings with lab title and time period. | Student |
-| add_lab | Creates a lab with title, description, time period and a place limit of 1 or more. Refused if the title already exists. | Staff |
-| list_lab_bookings | Lists the students who booked a given lab. | Staff |
+| list_labs | Lists the sessions on a given date (default today), each with lab title, description, owner, time period, place limit, free places and whether it is cancelled. | Any signed-in user |
+| get_lab | Returns one lab by id with its owner, place limit and upcoming sessions with their free places. For the lab's owner it also lists who booked each session. | Any signed-in user; the booking lists are for the owner only |
+| book_lab | Books a place in one session for the calling student. Refused if the session is full, cancelled or already started, or the student already booked it. | Student |
+| cancel_booking | Cancels the calling student's booking for a session before it starts and frees the place. | Student, own bookings only |
+| my_bookings | Lists the calling student's bookings with lab title, session time and whether the session was cancelled. | Student |
+| add_lab | Creates a lab owned by the caller, with title, description and a place limit of 1 or more. Refused if the title already exists. | Staff |
+| list_lab_bookings | Lists the students who booked each session of a given lab. | Staff who own the lab |
+| schedule_session | Adds a session to a lab: a start and an end, and optionally a date to repeat it weekly until. Refused if it starts in the past or overlaps another session of the lab, with the same messages as the web page. | Staff who own the lab |
+| cancel_session | Cancels an upcoming session of a lab. Its bookings are kept and shown to the students as cancelled. Refused once the session has started. | Staff who own the lab |
 
 ## UI
 - Stack: plain HTML, CSS and JavaScript served by the Go backend. There is no framework and no build step. One stylesheet, with spacing, type scale and colours defined as CSS custom properties. Pages are server-rendered, and small scripts handle the booking button and the smart search.
 - Screens:
   1. **Login** (`/login`): email and password, a "Sign in with <provider>" button, and an error line. Visitors who are not signed in land here from any protected page.
-  2. **Lab list** (`/labs`): today's available labs as cards, each with title, description, time period, and free places. It has a smart-search box with editable filter chips and a "Book" button on each card, which becomes "Full" and disabled when no places are left. The empty state reads "No labs available today", or "No labs match these filters" when search filters are applied.
-  3. **Lab detail and my bookings** (`/labs/{id}`, `/bookings`): a lab's details, with "Book" or "Cancel booking". The bookings page lists the student's own bookings. When a student books a full lab, they see "This lab is full" with links back to the lab list and the home page (AC-1).
-  4. **Staff: add lab and bookings** (`/staff/labs/new`, `/staff/labs/{id}`): a form with title, description, time period and place limit, and a table of students who booked each lab. These pages return 403 for students.
-- Layout: a single column that works at 380 px and widens to a centred max width on desktop. The header has the app name, the signed-in user and a Sign out button. Light theme only.
+  2. **Lab list** (`/labs`, `/labs?date=YYYY-MM-DD`): the sessions on one day (today by default) as cards, each with lab title, description, owner ("Run by …"), time period and free places. Links to the previous and next day and a labelled date field change the day. A smart-search box with editable filter chips. Each card has a "Book" button, which is disabled and reads "Full" when no places are left, "Closed" once the session has started, "Cancelled" when staff cancelled it, and "Booked" when the student has booked it. The empty state reads "No labs available today", "No labs on this day" for another day, or "No labs match these filters" when search filters are applied.
+  3. **Lab detail and my bookings** (`/labs/{id}`, `/bookings`): a lab's details and owner, and its upcoming sessions, each with "Book" or "Cancel booking". The bookings page lists the student's own bookings, marking those whose session was cancelled as "Cancelled by staff". When a student books a full session, they see "This lab is full" with links back to the lab list and the home page (AC-1).
+  4. **Staff: my labs, add lab** (`/staff/labs`, `/staff/labs/new`): the labs the signed-in staff member owns, each with its next session, and a form with title, description and place limit. Students get 403.
+  5. **Staff: one owned lab** (`/staff/labs/{id}`): the lab's details, an "Add a session" form (date, start time, end time, optional "Repeat weekly until"), and its sessions grouped by date, upcoming first, each with the places booked, the students who booked it and a "Cancel session" link. A "Delete lab" link while nobody has booked it. Only the owner may open it; everyone else gets 403.
+  6. **Confirmations** (`/staff/labs/{id}/delete`, `/staff/sessions/{id}/cancel`): one sentence naming what will change, a button that confirms it (POST), and a link back that changes nothing.
+- Layout: a single column that works at 380 px and widens to a centred max width on desktop. The header has the app name, the signed-in user and a Sign out button, and for staff "My labs" and "Add a lab". Light theme only.
 - States, on every screen: loading (static "Loading…" text), empty, error (one readable sentence) and success (a message at the top of the page, no reload needed).
 
 ## Architecture
@@ -70,29 +78,42 @@ A staff member adds a lab (`POST /staff/labs/new`):
 6. **Database**: the `labs` table and its unique title come from `migrations/000001_init.up.sql`. The unique constraint, not a prior lookup, decides a duplicate title, so two staff adding the same title at once cannot both succeed.
 7. **Back out**: on success the handler redirects to `/staff/labs/{id}?created=1`. A validation or conflict error re-renders `web/templates/lab_new.html` with the message and the typed values (400/409). Any other error goes through `fail` → `statusFor` in `internal/handler/render.go`, which shows one readable sentence (AC-43).
 
-**Where the code does not match the layering:** `newLabForm` and `addLab` in `internal/handler/staff.go` call `service.RequireStaff` themselves before calling the service. AGENTS.md says handlers never check roles. The rule itself still lives in the service, and `Labs.Add` checks it again, so the result is right. But the handler now decides when authorization runs: it does so to answer 403 before reading the form. `newLabForm` has no service call, so the role check is its only guard. An MCP `add_lab` tool will not get this early check, so the two paths differ in when they refuse, though not in what they refuse. The fix is a service method such as `Labs.NewLabForm(caller)` that the GET handler calls, and dropping the handler's own check from `addLab`.
+**Where the code does not match the layering:** `newLabForm` and `addLab` in `internal/handler/staff.go` call `service.RequireStaff` themselves before calling the service. AGENTS.md says handlers never check roles. The rule itself still lives in the service, and `Labs.Add` checks it again, so the result is right. But the handler now decides when authorization runs: it does so to answer 403 before reading the form. `newLabForm` has no service call, so the role check is its only guard. An MCP `add_lab` tool will not get this early check, so the two paths differ in when they refuse, though not in what they refuse. The fix is a service method such as `Labs.NewLabForm(caller)` that the GET handler calls, and dropping the handler's own check from `addLab`. Slice 3a makes this fix, because ownership checks must not follow the same pattern.
 
-## Acceptance criteria
-Each criterion is one behaviour, written as Given / When / Then, and tagged with how it is checked: `[http]` request and response, `[db]` database state, `[ui]` browser, `[mcp]` MCP tool call. IDs are stable once a test names them: new criteria get new numbers, and removed ones are listed at the end, not reused.
+This section describes the code as it is. Slices 3a and 3b change the add-lab form (no time period, and an owner) and move bookings onto sessions; the trace is updated when they are built.
 
-Decisions behind the wording:
+## Decisions
+How the criteria are written:
+- Each criterion is one behaviour, written as Given / When / Then, and tagged with how it is checked: `[http]` request and response, `[db]` database state, `[ui]` browser, `[mcp]` MCP tool call.
+- IDs are stable once a test names them: new criteria get new numbers, and removed ones are listed under "Retired criteria", not reused.
+- The definition of done covers only the pages that exist in the slice being checked: `/staff/labs/new` is checked from Slice 2 on, `/staff/labs` and `/staff/labs/{id}` from Slice 3a on.
+- `[ui]` criteria are checked over HTTP, by asserting on the rendered HTML and headers, unless the behaviour exists only in a browser (layout at a viewport width, keyboard use, script-driven updates). Those are checked by hand in a browser until a browser test tool is added.
+- Tests that depend on "today" or "tomorrow" run with a fixed clock. The fixed clock drives server logic only. Anything the client checks against its own clock, such as cookie expiry, is relative (`Max-Age`, not `Expires`), so tests keep passing as the real date moves on.
+
+The domain:
+- A **lab** is a title, a description, a place limit and an owner. A **session** is one scheduled run of a lab, with a start and an end (table `lab_sessions`; the sign-in records stay in `sessions`). From Slice 3b on, a criterion that books, fills or counts the free places of "a lab" means one session of it, and "its time period" means that session's.
+- The place limit belongs to the lab: every session of it has that many places. Free places of a session are the lab's `place_limit` minus that session's rows in `bookings`. This holds from Slice 1 on, even though bookings can only be made from Slice 3.
+- The owner is the staff member who added the lab. Only the owner adds and cancels its sessions, deletes it, and sees who booked it. Other staff see the same lab pages as students, without a Book button.
+- Two sessions of one lab cannot overlap, unless one is cancelled. A PostgreSQL exclusion constraint (`btree_gist`) decides it, not a prior lookup, so two staff adding sessions at once cannot both succeed.
+- A session can be booked until it starts. A cancelled session cannot be booked, and its bookings are kept so the student can see the cancellation; a cancelled session frees no places and cannot be un-cancelled.
+- A lab can be deleted only while it has no bookings at all, past ones included. Otherwise its owner cancels its sessions. Deleting and cancelling go through a server-rendered confirmation page, so they work without JavaScript; a script may turn it into a dialog.
+- Lab and session editing is out of scope: staff add labs and sessions, and cancel sessions.
+
+The pages:
 - `/` redirects to `/labs`, so "home page" means `/labs`.
 - Accounts are seeded; there is no sign-up screen. Staff and students are told apart by a role on the `users` row.
-- `/labs` defaults to labs whose time period includes today. A smart-search date filter may widen this to other dates.
-- Lab editing is out of scope: staff can only add labs.
-- Tests that depend on "today" or "tomorrow" run with a fixed clock. The fixed clock drives server logic only. Anything the client checks against its own clock, such as cookie expiry, is relative (`Max-Age`, not `Expires`), so tests keep passing as the real date moves on.
+- `/labs` defaults to the sessions whose time period includes part of today. `?date=` (Slice 3d) shows another day, and a smart-search date filter may widen it to a range.
 - "Today" is the calendar day in the server process's local timezone. A deployment sets that timezone explicitly.
 - A time period is shown as `HH:MM–HH:MM` when it starts and ends on the same day, and as `D Mon HH:MM – D Mon HH:MM` otherwise, both in that timezone.
-- Free places are `place_limit` minus the lab's rows in `bookings`. This holds from Slice 1 on, even though bookings can only be made from Slice 3.
-- `[ui]` criteria are checked over HTTP, by asserting on the rendered HTML and headers, unless the behaviour exists only in a browser (layout at a viewport width, keyboard use, script-driven updates). Those are checked by hand in a browser until a browser test tool is added.
 - Error pages (400, 401, 403, 404, 405, 409, 500) count as one page and share one title.
+- From Slice 3a on, every role and ownership check runs in the service. Handlers and MCP tools pass the caller in and never check roles themselves.
+
+## Acceptance criteria
 
 ### Definition of done (every slice)
-Each criterion here covers only the pages that exist in the slice being checked: `/staff/labs/new` is checked from Slice 2 on.
-
-- [AC-29] [ui] Given a 375px viewport, when `/labs`, `/login` and `/staff/labs/new` are opened, then there is no horizontal scroll and every button and input is visible and can be activated.
+- [AC-29] [ui] Given a 375px viewport, when `/labs`, `/login` and the staff pages are opened, then there is no horizontal scroll and every button and input is visible and can be activated.
 - [AC-30] [http] Given the served CSS, JS and HTML, when grepped, then they contain no language switcher, no theme toggle, and no `transition`, `animation` or `@keyframes` rule.
-- [AC-41] [ui] Given `/login`, `/labs` and `/staff/labs/new`, when inspected, then every input has an associated label, and sign-in, booking and add-lab can be completed with the keyboard alone.
+- [AC-41] [ui] Given `/login`, `/labs` and the staff pages, when inspected, then every input has an associated label, and sign-in, booking, add-lab, add-session, cancelling and deleting can be completed with the keyboard alone.
 - [AC-42] [http] Given any page, when fetched, then it has `<html lang="en">` and a `<title>` that no other page uses. All error pages count as one page and share one title.
 - [AC-43] [http] Given any failing request (validation, 403, 404, 409, 500), when the response is shown, then it is one readable sentence, with no raw JSON, stack trace or SQL.
 
@@ -107,14 +128,14 @@ Each criterion here covers only the pages that exist in the slice being checked:
 ### Slice 1: lab list
 - [AC-10] [ui] Given the three seeded labs available today, when a signed-in user opens `/labs`, then each lab is shown with title, description, time period and free places (`place_limit` minus its bookings).
 - [AC-11] [ui][db] Given a lab shown on `/labs`, when its row is deleted from `labs` and the page is reloaded, then the lab is gone.
-- [AC-22] [ui] Given a seeded lab whose time period starts tomorrow, when `/labs` is opened without a search, then that lab is not shown.
-- [AC-23] [ui] Given no lab is available today, when `/labs` is opened without a search, then it shows "No labs available today".
+- [AC-22] [ui] Given a seeded lab whose time period starts tomorrow, when `/labs` is opened without a date or a search, then that lab is not shown.
+- [AC-23] [ui] Given no lab is available today, when `/labs` is opened without a date or a search, then it shows "No labs available today".
 
 ### Slice 2: staff adds labs
-- [AC-12] [ui][db] Given a signed-in staff member, when they submit a title, description, time period and a place limit of 1 or more, then `labs` gains one row and the lab appears on `/labs`.
+- [AC-12] [ui][db] Given a signed-in staff member, when they submit a title, description and a place limit of 1 or more, then `labs` gains one row and they land on that lab's staff page. Until Slice 3b the form also takes a time period, and the lab appears on `/labs` on that day.
 - [AC-13] [http][db] Given a staff member, when they submit a place limit of 0, a negative number or non-numeric text, then a validation message is shown and no row is created.
 - [AC-2] [http][db] Given a lab titled "X" exists, when staff add another lab titled "X", then the response is 409 with "Please choose a different title" and no row is created.
-- [AC-14] [ui][db] Given a lab with bookings, when a staff member opens `/staff/labs/{id}`, then the table lists the names of exactly the students in the `bookings` rows for that lab.
+- [AC-14] [ui][db] Given a lab with bookings, when its owner opens `/staff/labs/{id}`, then the page lists the names of exactly the students in the `bookings` rows for that lab, per session from Slice 3b on. Until Slice 3a every staff member counts as the owner.
 - [AC-15] [http][db] Given a signed-in student, when they GET or POST `/staff/labs/new`, then the response is 403 and no row is created.
 - [AC-45] [http] Given a signed-in student, when they GET `/staff/labs/{id}`, then the response is 403 and no booking list is returned.
 
@@ -126,16 +147,56 @@ Each criterion here covers only the pages that exist in the slice being checked:
 - [AC-6] [db] Given a lab with one free place, when two students book it at the same time, then exactly one succeeds, the other sees "This lab is full", and the number of bookings never exceeds the lab's limit.
 - [AC-46] [http][db] Given a signed-in staff member, when they POST a booking, then the response is 403 and no row is created.
 - [AC-47] [http] Given an id that matches no lab, when a booking or lab page is requested, then the response is 404 with a readable sentence.
-- [AC-48] [http][db] Given a lab whose time period does not include today, when a student POSTs a booking for it, then the response is 409 with "This lab is not open for booking today." and no row is created.
+
+### Slice 3a: lab owners and "My labs"
+- [AC-60] [db] Given a signed-in staff member, when they add a lab, then its `labs` row has them as its owner.
+- [AC-61] [ui] Given labs owned by different staff, when `/labs` or `/labs/{id}` is opened, then each lab shows "Run by" and its owner's name.
+- [AC-62] [ui] Given labs owned by two staff members, when one of them opens `/staff/labs`, then it lists exactly the labs they own, including labs with no session today, each linking to its `/staff/labs/{id}`.
+- [AC-63] [ui] Given a staff member who owns no lab, when they open `/staff/labs`, then it shows "You have no labs yet." with a link to `/staff/labs/new`.
+- [AC-64] [http] Given a lab owned by another staff member, when a staff member GETs its `/staff/labs/{id}`, then the response is 403 and no booking list is returned.
+- [AC-65] [http] Given a signed-in student, when they GET `/staff/labs`, then the response is 403.
+
+### Slice 3b: sessions
+- [AC-66] [db] Given a database with labs, time periods and bookings from before Slice 3b, when the migration runs, then each lab has one session with its old time period, each booking belongs to that session, each lab is owned by a staff account, and no lab or booking is lost.
+- [AC-67] [ui][db] Given a lab's owner, when they add a session with a date, a start time and an end time, then `lab_sessions` gains one row for that lab, and it is listed on the lab's staff page and on `/labs/{id}`.
+- [AC-68] [http][db] Given a lab's owner, when they add a session whose end is not after its start, which starts in the past, or whose date or time cannot be read, then the response is 400 with a validation message and no row is created.
+- [AC-69] [http][db] Given a session of a lab, when its owner adds another session of that lab that overlaps it, then the response is 409 with "This lab already has a session at that time." and no row is created. When two overlapping sessions are added at the same time, exactly one is created.
+- [AC-70] [db] Given a lab's owner, when they add a session with "Repeat weekly until" a date, then there is one session per week up to and including that date, at most 26. If any of them would overlap an existing session, none is created and the response is 409.
+- [AC-71] [db] Given two sessions of one lab, when a student books one of them, then only that session's free places drop by 1, and the student can also book the other one.
+- [AC-72] [http][db] Given a lab, when a student or a staff member who does not own it POSTs a new session for it, then the response is 403 and no row is created.
+
+### Slice 3c: cancelling sessions and deleting labs
+- [AC-73] [ui][db] Given an upcoming session with bookings, when its lab's owner confirms "Cancel session", then the session is marked cancelled, its `bookings` rows are kept, and `/labs` and `/labs/{id}` show it as "Cancelled" with no Book button.
+- [AC-74] [http][db] Given a cancelled session, when a student POSTs a booking for it, then the response is 409 with "This session has been cancelled." and no row is created.
+- [AC-75] [http][db] Given a session that has started, when its owner POSTs a cancel for it, then the response is 409 with "This session has already started." and the session is unchanged.
+- [AC-76] [ui][http] Given a lab's owner, when they open the delete page of the lab or the cancel page of a session, then it names the lab and, for a session, its time period, offers a confirm button and a link back, and nothing changes until the confirm button is used.
+- [AC-77] [http][db] Given a lab with no bookings, when its owner confirms "Delete lab", then the lab and its sessions are gone and they land on `/staff/labs` with "Lab deleted.". Given a lab with any booking, the response is 409 with "This lab has bookings. Cancel its sessions instead." and nothing is deleted.
+- [AC-78] [db] Given a lab with no bookings, when its owner deletes it while a student books one of its sessions, then either the delete is refused with 409 and the booking stays, or the booking fails with 404 and the lab is gone. A booking is never deleted with the lab.
+- [AC-79] [http][db] Given a lab or a session, when a student or a staff member who does not own the lab POSTs a delete or a cancel, then the response is 403 and nothing changes.
+
+### Slice 3d: browsing by date and booking cut-off
+- [AC-80] [ui] Given sessions on several days, when `/labs?date=YYYY-MM-DD` is opened, then it shows the sessions on that day, a heading naming the day, links to the previous and next day, and a labelled date field that shows another day.
+- [AC-81] [http] Given a `date` that is not a valid `YYYY-MM-DD` date, when `/labs` is opened with it, then the response is 400 with "Please choose a valid date.".
+- [AC-82] [ui] Given a day other than today with no session, when `/labs?date=` shows it, then it reads "No labs on this day".
+- [AC-83] [http][db] Given a session that has started, when a student POSTs a booking for it, then the response is 409 with "Booking is closed: this session has already started." and no row is created, and `/labs` shows its button disabled as "Closed".
+- [AC-84] [http][db] Given a session tomorrow with a free place, when a student books it, then the booking succeeds and `bookings` has one row for it.
+
+### Slice 3e: CSRF protection
+- [AC-85] [http][db] Given a signed-in user, when they POST to book, add a lab, add a session, cancel, delete or sign out without the CSRF token or with a wrong one, then the response is 403 with "This page has expired. Please reload it and try again." and nothing changes.
+- [AC-86] [http] Given two signed-in users, when one POSTs a form with the other's CSRF token, then the response is 403 and nothing changes.
+- [AC-87] [http] Given any page with a form that changes something, when it is rendered, then the form carries the CSRF token, and the booking script sends it in a request header.
 
 ### Slice 4: cancelling
 - [AC-7] [ui][db] Given a student with a booking, when they cancel it, then the free-place count goes up by 1 and the `bookings` row is gone.
 - [AC-49] [http][db] Given a student with no booking for a lab, when they POST a cancel for it, then the response is 404 and `bookings` is unchanged.
 - [AC-50] [db] Given a full lab, when one student cancels and another then books, then the second booking succeeds and the bookings count equals the limit.
+- [AC-88] [http][db] Given a booking for a session that has started, when the student POSTs a cancel for it, then the response is 409 and the booking is kept.
+- [AC-89] [ui] Given a student who booked a session, when `/labs` or `/labs/{id}` is reloaded, then that session's button is disabled and reads "Booked".
+- [AC-90] [ui] Given a student's bookings, one of them for a cancelled session, when they open `/bookings`, then each booking shows its lab title and time period, and the cancelled one reads "Cancelled by staff".
 
 ### Slice 5: MCP tools
-- [AC-24] [mcp] Given the server, when `tools/list` is called, then all seven tools in the MCP table appear, each with a description of at least 20 characters.
-- [AC-39] [mcp][db] Given a caller with no valid token, when any of the seven tools is called, then an authentication error is returned and the database is unchanged.
+- [AC-24] [mcp] Given the server, when `tools/list` is called, then all nine tools in the MCP table appear, each with a description of at least 20 characters.
+- [AC-39] [mcp][db] Given a caller with no valid token, when any of the nine tools is called, then an authentication error is returned and the database is unchanged.
 - [AC-37] [mcp][db] Given a student and a lab with a free place, when `book_lab` succeeds, then its result matches the HTTP booking, the free-place count drops by 1, and `bookings` has one new row for the caller.
 - [AC-25] [mcp][db] Given a student and a full lab, when `book_lab` is called, then it returns the same "full" error as the HTTP API and no row is created.
 - [AC-51] [mcp][db] Given a staff caller, when `book_lab` is called, then it is refused and no row is created.
@@ -144,6 +205,10 @@ Each criterion here covers only the pages that exist in the slice being checked:
 - [AC-35] [mcp][db] Given another student's booking, when a student calls `cancel_booking` for it, then it is refused and that row is unchanged.
 - [AC-36] [mcp] Given a student caller, when `list_lab_bookings` is called it is refused, and when `get_lab` is called it returns the lab details without the booking list.
 - [AC-40] [mcp] Given bookings by several students, when a student calls `my_bookings`, then only that student's bookings are returned.
+- [AC-91] [mcp] Given a staff caller who does not own a lab, when `list_lab_bookings` is called for it, then it is refused, and `get_lab` returns the lab without the booking lists.
+- [AC-92] [mcp][db] Given a lab's owner, when `schedule_session` is called with a valid start and end, then `lab_sessions` gains the same rows as adding the session on the web page, and when it overlaps an existing session it is refused with the same message as the web page and no row is created.
+- [AC-93] [mcp][db] Given a lab's owner and an upcoming session with bookings, when `cancel_session` is called, then the session is marked cancelled and its `bookings` rows are kept, matching the web page.
+- [AC-94] [mcp][db] Given a student or a staff caller who does not own the lab, when `schedule_session` or `cancel_session` is called, then it is refused and nothing changes.
 
 ### Slice 6: Google sign-in
 - [AC-20] [http][db] Given a local account whose email Google marks as verified, when its owner first signs in with Google, then there is still one `users` row and the Google account id is attached to it.
@@ -164,9 +229,10 @@ Each criterion here covers only the pages that exist in the slice being checked:
 - [AC-28] [db] Given any smart search, when it runs, then no row in any table is inserted, updated or deleted.
 - [AC-59] [ui] Given applied search filters that match no lab, when the results are shown, then they read "No labs match these filters" and the filter chips are still shown so they can be edited.
 
-### Retired
+## Retired criteria
 - AC-16 (lowering a lab's limit): there is no lab-editing feature.
 - AC-44 (booking confirmation without reload): merged into AC-4.
+- AC-48 (a lab whose time period does not include today cannot be booked): replaced in Slice 3d by AC-83 and AC-84. Booking is no longer limited to today; it closes when the session starts. Its tests are renamed when Slice 3d replaces them.
 
 ## Traceability
 <!-- Filled in from Exercise 3 onward: each AC id, and the test that names it. -->
@@ -187,7 +253,7 @@ Each criterion here covers only the pages that exist in the slice being checked:
 | AC-6 | `TestBookTheLastPlaceThenFull_AC6`, `TestAC6_DB_BookLabHoldsTheLabLockWhileTheCheckRuns`, `TestAC6_DB_ConcurrentBookingsOfTheLastPlaceLetExactlyOneThrough` |
 | AC-46 | `TestRequireStudent_AC46`, `TestBookByStaffIsForbidden_AC46`, `TestAC46_StaffBookingIs403`, `TestAC46_DB_StaffBookingIs403AndCreatesNoRow` |
 | AC-47 | `TestBookUnknownLabIsNotFound_AC47`, `TestGetLabShowsFreePlaces_AC47`, `TestAC47_UnknownLabIs404`, `TestAC47_DB_UnknownLabIs404AndCreatesNoRow`, `TestBookLabReportsAMissingLabAndADuplicate_AC47_AC5` |
-| AC-48 | `TestBookLabNotAvailableTodayIsRefused_AC48`, `TestAC48_LabNotAvailableTodayIsRefused`, `TestAC48_DB_LabNotAvailableTodayIsRefusedAndCreatesNoRow` |
+| AC-48 (retired) | `TestBookLabNotAvailableTodayIsRefused_AC48`, `TestAC48_LabNotAvailableTodayIsRefused`, `TestAC48_DB_LabNotAvailableTodayIsRefusedAndCreatesNoRow` |
 | AC-19 | `TestBookWithoutCallerIsUnauthenticated_AC19`, `TestAC19_BookingWithoutSessionIs401`, `TestAC19_ScriptBookingWithoutSessionIs401`, `TestAC19_DB_BookingWithoutSessionIs401AndBookingsUnchanged` |
 
 ## Spec vs result
@@ -251,3 +317,13 @@ Decisions taken while building it:
 
 What changed in this spec because of it:
 - AC-48 gives the status and the exact sentence.
+
+### Re-plan before Slice 4 (2026-11-17, no code yet)
+New features were discussed and added as Slices 3a–3e, before Slices 4–7 build on the data model:
+- Labs get an owner, and owner-only staff pages: "My labs" and one owned lab (AC-60–65). Until now every staff member could see every lab's booking list, and a lab outside today could only be found again through the redirect after adding it.
+- A lab and its schedule are separate: a lab has many sessions, added as a list with an optional weekly repeat, never overlapping (AC-66–72). A calendar grid was rejected: too much plain JavaScript for 375 px and keyboard use.
+- Staff cancel sessions instead of deleting booked labs, so a student can see the cancellation without notifications; a lab can be deleted only while nobody has booked it (AC-73–79).
+- Booking is no longer limited to today: students browse by date, and booking closes when the session starts (AC-80–84). AC-48 is retired.
+- CSRF tokens on every form that changes something, now that staff can delete and cancel (AC-85–87). This reverses the Slice 3 decision to rely on `SameSite=Lax` alone.
+- Gaps closed in Slice 4: the "Booked" state after a reload, cancelled sessions on `/bookings`, and no cancelling after a session starts (AC-88–90). MCP: owner-only booking lists (AC-91), and two new tools, `schedule_session` and `cancel_session`, so staff can manage sessions through MCP as on the web pages (AC-92–94; AC-24 and AC-39 now count nine tools). Lab editing stays a non-goal.
+- The decisions and the retired criteria moved out of the acceptance-criteria section, which the spec self-check read as criteria without an id.
