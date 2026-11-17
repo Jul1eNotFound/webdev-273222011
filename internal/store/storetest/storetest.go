@@ -55,6 +55,24 @@ func InsertBooking(t testing.TB, pool *pgxpool.Pool, userID, labID int64) {
 	}
 }
 
+// Warm opens n connections and returns them to the pool idle, as in a server that has been running a
+// while. Concurrency tests need it: opening a connection takes longer than a booking, so on a cold
+// pool the first goroutine finishes before the others connect and nothing overlaps.
+func Warm(t testing.TB, pool *pgxpool.Pool, n int) {
+	t.Helper()
+	conns := make([]*pgxpool.Conn, 0, n)
+	for range n {
+		c, err := pool.Acquire(context.Background())
+		if err != nil {
+			t.Fatalf("warm pool: %v", err)
+		}
+		conns = append(conns, c)
+	}
+	for _, c := range conns {
+		c.Release()
+	}
+}
+
 // Count returns the number of rows in table. table must be a trusted constant.
 func Count(t testing.TB, pool *pgxpool.Pool, table string) int {
 	t.Helper()
