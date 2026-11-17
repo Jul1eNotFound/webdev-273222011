@@ -25,6 +25,8 @@ type pageData struct {
 	Email   string
 	// Sessions is the lab list (/labs).
 	Sessions []service.SessionCard
+	// Day is the day the lab list shows, with its neighbours (AC-80).
+	Day *service.DayList
 	// LabPage is one lab and its upcoming sessions (/labs/{id}).
 	LabPage *service.LabPage
 	// Staff is one owned lab with its sessions and who booked them (/staff/labs/{id}).
@@ -46,7 +48,7 @@ type renderer struct {
 // newRenderer takes the timezone that lab times are shown in.
 func newRenderer(loc *time.Location) (*renderer, error) {
 	rn := &renderer{pages: map[string]*template.Template{}}
-	funcs := template.FuncMap{"period": period(loc), "day": day(loc)}
+	funcs := template.FuncMap{"period": period(loc), "day": day(loc), "longDay": longDay(loc)}
 	for _, name := range []string{"login", "labs", "lab", "error", "my_labs", "lab_new", "lab_staff", "confirm"} {
 		t, err := template.New(name).Funcs(funcs).ParseFS(web.FS, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
@@ -72,6 +74,11 @@ func period(loc *time.Location) func(from, to time.Time) string {
 // day names a session's date, as in "Thu 22 Oct", for the staff page's date headings.
 func day(loc *time.Location) func(t time.Time) string {
 	return func(t time.Time) string { return t.In(loc).Format("Mon 2 Jan") }
+}
+
+// longDay names the day the lab list shows, as in "Friday 23 October 2026" (AC-80).
+func longDay(loc *time.Location) func(t time.Time) string {
+	return func(t time.Time) string { return t.In(loc).Format("Monday 2 January 2006") }
 }
 
 // page renders into a buffer first, so a template error never sends half a page.

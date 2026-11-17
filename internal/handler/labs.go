@@ -17,12 +17,13 @@ const msgBooked = "Booking confirmed."
 
 func (h *handler) labsPage(w http.ResponseWriter, r *http.Request) {
 	c, _ := auth.CallerFrom(r.Context())
-	sessions, err := h.Labs.ListToday(r.Context(), c)
+	// No date is today; a date that is not a real day is a 400 through fail (AC-81).
+	list, err := h.Labs.ListDay(r.Context(), c, r.URL.Query().Get("date"))
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	h.page(w, http.StatusOK, "labs", pageData{Title: "Labs · Labwiz", User: &c, Sessions: sessions})
+	h.page(w, http.StatusOK, "labs", pageData{Title: "Labs · Labwiz", User: &c, Sessions: list.Sessions, Day: &list})
 }
 
 // labPage shows one lab and its upcoming sessions, each with its free places and, for students, a

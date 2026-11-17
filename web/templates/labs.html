@@ -1,5 +1,19 @@
 {{define "content"}}
-<h1>Labs available today</h1>
+{{with .Day}}
+<h1>{{if .Today}}Labs available today{{else}}Labs on {{longDay .Day}}{{end}}</h1>
+<nav class="day-nav" aria-label="Choose a day">
+  <p class="day-nav__links">
+    <a href="/labs?date={{.Prev}}">← Previous day</a>
+    {{if not .Today}}<a href="/labs">Today</a>{{end}}
+    <a href="/labs?date={{.Next}}">Next day →</a>
+  </p>
+  <form method="get" action="/labs">
+    <label for="date">Show another day</label>
+    <input id="date" name="date" type="date" value="{{.Date}}">
+    <button type="submit" class="button button--secondary">Show</button>
+  </form>
+</nav>
+{{end}}
 <p id="flash" class="message" role="status" hidden></p>
 {{if .Sessions}}
 <ul class="lab-list">
@@ -12,7 +26,9 @@
   </li>
   {{end}}
 </ul>
-{{else}}
+{{else if .Day.Today}}
 <p class="empty">No labs available today</p>
+{{else}}
+<p class="empty">No labs on this day</p>
 {{end}}
 {{end}}
