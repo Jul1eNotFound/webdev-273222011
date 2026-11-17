@@ -126,7 +126,7 @@ Each criterion here covers only the pages that exist in the slice being checked:
 - [AC-6] [db] Given a lab with one free place, when two students book it at the same time, then exactly one succeeds, the other sees "This lab is full", and the number of bookings never exceeds the lab's limit.
 - [AC-46] [http][db] Given a signed-in staff member, when they POST a booking, then the response is 403 and no row is created.
 - [AC-47] [http] Given an id that matches no lab, when a booking or lab page is requested, then the response is 404 with a readable sentence.
-- [AC-48] [http][db] Given a lab whose time period does not include today, when a student POSTs a booking for it, then it is refused and no row is created.
+- [AC-48] [http][db] Given a lab whose time period does not include today, when a student POSTs a booking for it, then the response is 409 with "This lab is not open for booking today." and no row is created.
 
 ### Slice 4: cancelling
 - [AC-7] [ui][db] Given a student with a booking, when they cancel it, then the free-place count goes up by 1 and the `bookings` row is gone.
@@ -180,6 +180,15 @@ Each criterion here covers only the pages that exist in the slice being checked:
 | AC-14 | `TestLabBookingsListsExactlyTheBookers_AC14`, `TestAC14_StaffSeesBookersTable`, `TestAC14_DB_StaffSeesExactlyTheStudentsWhoBooked` |
 | AC-15 | `TestAddLabStudentIsForbidden_AC15`, `TestRequireStaff_AC15`, `TestAC15_StudentGetAndPostNewLabAre403`, `TestAC15_DB_StudentGetsAndPosts403AndNoRow` |
 | AC-45 | `TestLabBookingsStudentIsForbidden_AC45`, `TestAC45_StudentGetsStaffLabPage403`, `TestAC45_DB_StudentGetsStaffLabPage403` |
+| AC-4 | `TestBookTakesOnePlace_AC4`, `TestAC4_ScriptBookingConfirmsAndReturnsTheNewCount`, `TestAC4_FormBookingRedirectsToTheLabWithConfirmation`, `TestAC4_BookingScriptIsServedAndLoaded`, `TestAC4_DB_BookingAddsExactlyOneRowAndLowersTheCount` |
+| AC-5 | `TestBookTwiceIsAlreadyBooked_AC5`, `TestAC5_SecondBookingIs409`, `TestAC5_DB_SecondBookingIs409AndLeavesOneRow`, `TestBookLabReportsAMissingLabAndADuplicate_AC47_AC5` |
+| AC-1 | `TestBookFullLabIsRefused_AC1`, `TestAC1_FullLabIs409WithLinksToTheListAndHome`, `TestAC1_DB_FullLabIs409AndCreatesNoRow` |
+| AC-8 | `TestAC8_FullLabShowsADisabledFullButtonAndRefusesAPost`, `TestAC8_DB_FullLabShowsFullAndRefusesAPost` |
+| AC-6 | `TestBookTheLastPlaceThenFull_AC6`, `TestAC6_DB_BookLabHoldsTheLabLockWhileTheCheckRuns`, `TestAC6_DB_ConcurrentBookingsOfTheLastPlaceLetExactlyOneThrough` |
+| AC-46 | `TestRequireStudent_AC46`, `TestBookByStaffIsForbidden_AC46`, `TestAC46_StaffBookingIs403`, `TestAC46_DB_StaffBookingIs403AndCreatesNoRow` |
+| AC-47 | `TestBookUnknownLabIsNotFound_AC47`, `TestGetLabShowsFreePlaces_AC47`, `TestAC47_UnknownLabIs404`, `TestAC47_DB_UnknownLabIs404AndCreatesNoRow`, `TestBookLabReportsAMissingLabAndADuplicate_AC47_AC5` |
+| AC-48 | `TestBookLabNotAvailableTodayIsRefused_AC48`, `TestAC48_LabNotAvailableTodayIsRefused`, `TestAC48_DB_LabNotAvailableTodayIsRefusedAndCreatesNoRow` |
+| AC-19 | `TestBookWithoutCallerIsUnauthenticated_AC19`, `TestAC19_BookingWithoutSessionIs401`, `TestAC19_ScriptBookingWithoutSessionIs401`, `TestAC19_DB_BookingWithoutSessionIs401AndBookingsUnchanged` |
 
 ## Spec vs result
 <!-- After the agent builds the slice: which criteria passed, which it missed or reinterpreted, and what you changed in this spec because of it. -->
@@ -216,3 +225,29 @@ What changed in this spec because of it:
 - AC-23 applies without a search; new AC-59 covers the empty state with search filters.
 - The definition of done covers only the pages that exist in the slice.
 - AC-42: all error pages count as one page and share one title.
+
+### Slice 1 follow-up and Slice 3 (checked 2026-11-17)
+Checked with `go test ./...` against the in-memory store and a real `labwiz_test` database (no test skipped), `go test -race` on the booking tests, `node --check` on `booking.js`, and by reading the code. AC-10 and AC-23, missed on 2026-11-03, now pass: the cards show description, time period and free places, and an empty day shows "No labs available today".
+
+| Criterion | Result | Notes |
+| --- | --- | --- |
+| AC-4 | Passed over HTTP | The script gets JSON (`message`, `free_places`) and rewrites the card; without JS the form redirects to `/labs/{id}?booked=1`. The script's behaviour in a real browser is not yet checked by hand. |
+| AC-5 | Passed | Refused in the service from a check made under the lab lock; the `UNIQUE (user_id, lab_id)` constraint is the backstop. |
+| AC-1 | Passed | The error page now links to `/labs` and `/` on every error, and the script shows the same two links. |
+| AC-8 | Passed | Server-rendered disabled "Full" button; a direct POST is 409. |
+| AC-6 | Passed | `labs` row lock (`SELECT … FOR UPDATE`) in one transaction. The first test version passed even with the lock removed, because a cold connection pool kept the goroutines from overlapping. The tests now warm the pool, and a store test forces the race with a slow check. Both fail without the lock and pass with it. |
+| AC-46 | Passed | `RequireStudent` in the service; no role check in the handler. |
+| AC-47 | Passed | `POST /labs/{id}/book` and the new `GET /labs/{id}`, including a non-numeric id. |
+| AC-48 | Passed, reinterpreted | "Refused" was not specific: it is now 409 with "This lab is not open for booking today.", using the same "available today" rule as the lab list. |
+| AC-19 | Passed, re-checked | Against the real endpoint. A script request without a session gets the 401 sentence as JSON. |
+| AC-29, AC-41 | Untested | `/labs/{id}` and the Book button are new. 375 px layout and keyboard-only booking still need a check by hand. |
+| AC-30, AC-42, AC-43 | Passed | Extended to `booking.js` and `/labs/{id}`. Booking errors show one sentence; the JSON is read only by the script. |
+
+Decisions taken while building it:
+- One endpoint for both clients: a request with `Accept: application/json` gets JSON, a plain form post gets a redirect or the error page.
+- The booking rules (already booked, not open today, full) live in `Labs.Book` and are passed to `store.BookLab`, which runs them inside its transaction while the lab is locked. The rules stay in the service, and atomicity stays in the store.
+- No CSRF token: the session cookie is `SameSite=Lax`, so a cross-site POST carries no session.
+- `/bookings` and the Cancel button move to Slice 4, with cancelling. After a booking, the script turns the button into a disabled "Booked". A reload shows "Book" again until Slice 4 knows the caller's own bookings; pressing it then gives "You have already booked this lab".
+
+What changed in this spec because of it:
+- AC-48 gives the status and the exact sentence.
