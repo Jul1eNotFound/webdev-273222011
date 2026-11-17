@@ -40,7 +40,7 @@
     event.preventDefault();
 
     var button = form.querySelector('button');
-    var card = form.closest('[data-lab]');
+    var card = form.closest('[data-session]');
     var label = button.textContent;
     button.disabled = true;
     button.textContent = 'Booking…';

@@ -1,13 +1,24 @@
 {{define "content"}}
 {{with .Success}}<p class="message message--success" role="status">{{.}}</p>{{end}}
 <p id="flash" class="message" role="status" hidden></p>
-{{with .Card}}
-<section data-lab="{{.ID}}">
-  <h1 id="lab-{{.ID}}-title">{{.Title}}</h1>
-  <p class="lab-meta">{{period .StartsAt .EndsAt}} · {{template "freePlaces" .}} · {{template "owner" .}}</p>
-  {{with .Description}}<p>{{.}}</p>{{end}}
-  {{if eq .OwnerID $.User.ID}}<p><a href="/staff/labs/{{.ID}}">See who booked this lab</a></p>{{else if not $.User.IsStaff}}{{template "bookForm" .}}{{end}}
-</section>
+{{with .LabPage}}
+<h1>{{.Lab.Title}}</h1>
+<p class="lab-meta">{{template "owner" .Lab}} · {{.Lab.PlaceLimit}} places per session</p>
+{{with .Lab.Description}}<p>{{.}}</p>{{end}}
+{{if eq .Lab.OwnerID $.User.ID}}<p><a href="/staff/labs/{{.Lab.ID}}">Manage its sessions and see who booked</a></p>{{end}}
+<h2>Upcoming sessions</h2>
+{{if .Sessions}}
+<ul class="lab-list">
+  {{range .Sessions}}
+  <li class="lab-list__item" data-session="{{.SessionID}}">
+    <p class="lab-meta"><span class="lab-card__period" id="session-{{.SessionID}}-title">{{day .StartsAt}}, {{period .StartsAt .EndsAt}}</span> · {{template "freePlaces" .}}</p>
+    {{if not $.User.IsStaff}}{{template "bookForm" .}}{{end}}
+  </li>
+  {{end}}
+</ul>
+{{else}}
+<p class="empty">This lab has no upcoming sessions.</p>
+{{end}}
 {{end}}
 <p><a href="/labs">Back to the lab list</a></p>
 {{end}}

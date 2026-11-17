@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jul1eNotFound/webdev-273222011/internal/service/servicetest"
 	"github.com/Jul1eNotFound/webdev-273222011/internal/store"
 )
 
@@ -13,10 +14,8 @@ func TestAC10_LabCardsShowTitleDescriptionPeriodAndFreePlaces(t *testing.T) {
 	base, st := newFakeApp(t)
 	day := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
 	st.Labs[0].Description = "Titration and safe handling of reagents."
-	st.Labs = append(st.Labs, store.Lab{
-		ID: 4, Title: "Night shift", Description: "Runs past midnight.",
-		StartsAt: day.Add(22 * time.Hour), EndsAt: day.Add(26 * time.Hour), PlaceLimit: 3, OwnerID: stellaID,
-	})
+	st.Labs = append(st.Labs, store.Lab{ID: 4, Title: "Night shift", Description: "Runs past midnight.", PlaceLimit: 3, OwnerID: stellaID})
+	st.LabSessions = append(st.LabSessions, servicetest.LabSession{ID: 4, LabID: 4, StartsAt: day.Add(22 * time.Hour), EndsAt: day.Add(26 * time.Hour)})
 	st.Bookers[1] = []store.Booker{{Name: "Ana Example"}, {Name: "Ben Example"}, {Name: "Cleo Example"}}
 	st.Bookers[2] = []store.Booker{{Name: "Ana Example"}, {Name: "Ben Example"}}
 
@@ -36,8 +35,8 @@ func TestAC10_LabCardsShowTitleDescriptionPeriodAndFreePlaces(t *testing.T) {
 
 func TestAC23_NoLabTodayShowsEmptyState(t *testing.T) {
 	base, st := newFakeApp(t)
-	// Keep only the lab that starts tomorrow.
-	st.Labs = st.Labs[2:]
+	// Keep only the lab whose session starts tomorrow.
+	st.Labs, st.LabSessions = st.Labs[2:], st.LabSessions[2:]
 	c := signedIn(t, base, studentEmail, studentPass)
 	r := do(t, c, http.MethodGet, base+"/labs", nil)
 	wantStatus(t, r, http.StatusOK, "No labs available today")

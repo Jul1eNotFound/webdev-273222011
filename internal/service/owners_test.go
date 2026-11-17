@@ -11,20 +11,20 @@ import (
 	"github.com/Jul1eNotFound/webdev-273222011/internal/store"
 )
 
-// otherStaff is a second staff member, who owns none of staff's labs.
-var otherStaff = service.Caller{ID: 3, Name: "Omar", Role: service.RoleStaff}
-
-// ownedStore has lab 1 and 2 owned by staff (Stella, id 2) and lab 3 owned by otherStaff (Omar, id 3).
+// ownedStore has lab 1 and 2 owned by staff (Stella, id 2) and lab 3 owned by otherStaff (Omar, id 3),
+// each with one session whose id is the lab's; Robotics' session is tomorrow. Lab 4, also Stella's,
+// has no session.
 func ownedStore() *servicetest.Store {
 	st := servicetest.NewStore()
 	st.AddUser(store.User{ID: staff.ID, Email: "stella@labwiz.test", Name: "Stella Staff", Role: "staff"})
 	st.AddUser(store.User{ID: otherStaff.ID, Email: "omar@labwiz.test", Name: "Omar Haddad", Role: "staff"})
-	day := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
 	st.Labs = []store.Lab{
-		{ID: 1, Title: "Optics", StartsAt: day.Add(9 * time.Hour), EndsAt: day.Add(11 * time.Hour), PlaceLimit: 4, OwnerID: staff.ID},
-		{ID: 2, Title: "Robotics", StartsAt: day.Add(33 * time.Hour), EndsAt: day.Add(36 * time.Hour), PlaceLimit: 8, OwnerID: staff.ID},
-		{ID: 3, Title: "Circuits", StartsAt: day.Add(13 * time.Hour), EndsAt: day.Add(15 * time.Hour), PlaceLimit: 2, OwnerID: otherStaff.ID},
+		{ID: 1, Title: "Optics", PlaceLimit: 4, OwnerID: staff.ID},
+		{ID: 2, Title: "Robotics", PlaceLimit: 8, OwnerID: staff.ID},
+		{ID: 3, Title: "Circuits", PlaceLimit: 2, OwnerID: otherStaff.ID},
+		{ID: 4, Title: "Acoustics", PlaceLimit: 6, OwnerID: staff.ID},
 	}
+	st.LabSessions = []servicetest.LabSession{sess(1, 1, 9, 11), sess(2, 2, 33, 36), sess(3, 3, 13, 15)}
 	st.Bookers[1] = []store.Booker{{Name: "Ana"}}
 	return st
 }
@@ -53,9 +53,9 @@ func TestLabsShowTheirOwnersName_AC61(t *testing.T) {
 	if owners["Optics"] != "Stella Staff" || owners["Circuits"] != "Omar Haddad" {
 		t.Fatalf("owners = %v", owners)
 	}
-	lab, err := l.Get(context.Background(), student, 3)
-	if err != nil || lab.OwnerName != "Omar Haddad" {
-		t.Fatalf("Get: owner = %q, err = %v", lab.OwnerName, err)
+	page, err := l.Get(context.Background(), student, 3)
+	if err != nil || page.Lab.OwnerName != "Omar Haddad" || page.Sessions[0].OwnerName != "Omar Haddad" {
+		t.Fatalf("Get: page = %+v, err = %v", page, err)
 	}
 }
 
@@ -65,12 +65,16 @@ func TestMyLabsListsOnlyTheCallersLabs_AC62(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Robotics starts tomorrow: My labs is not limited to today.
-	if len(labs) != 2 || labs[0].Title != "Optics" || labs[1].Title != "Robotics" {
-		t.Fatalf("labs = %+v, want Optics and Robotics", labs)
+	// Robotics' session is tomorrow and Acoustics has none: My labs is not limited to today.
+	// Labs with a next session come first, soonest first.
+	if len(labs) != 3 || labs[0].Title != "Optics" || labs[1].Title != "Robotics" || labs[2].Title != "Acoustics" {
+		t.Fatalf("labs = %+v, want Optics, Robotics, Acoustics", labs)
 	}
-	if labs[0].FreePlaces != 3 || labs[0].OwnerName != "Stella Staff" {
-		t.Errorf("Optics = %+v, want 3 free places and owner Stella Staff", labs[0])
+	if labs[0].Next == nil || !labs[0].Next.StartsAt.Equal(at(9)) || labs[0].Sessions != 1 || labs[0].OwnerName != "Stella Staff" {
+		t.Errorf("Optics = %+v, want its running session next and owner Stella Staff", labs[0])
+	}
+	if labs[2].Next != nil || labs[2].Sessions != 0 {
+		t.Errorf("Acoustics = %+v, want no sessions", labs[2])
 	}
 	other, err := l.MyLabs(context.Background(), otherStaff)
 	if err != nil || len(other) != 1 || other[0].Title != "Circuits" {
@@ -105,12 +109,13 @@ func TestMyLabsStoreError(t *testing.T) {
 
 func TestLabBookingsAreForTheOwnerOnly_AC64(t *testing.T) {
 	l := service.NewLabs(ownedStore(), clock, time.UTC)
-	_, bookers, err := l.Bookings(context.Background(), otherStaff, 1)
-	if err != service.ErrForbidden || bookers != nil {
-		t.Fatalf("another staff member: err = %v, bookers = %+v; want ErrForbidden and none", err, bookers)
+	page, err := l.Bookings(context.Background(), otherStaff, 1)
+	if err != service.ErrForbidden || page.Upcoming != nil || page.Past != nil {
+		t.Fatalf("another staff member: err = %v, page = %+v; want ErrForbidden and nothing", err, page)
 	}
-	if _, bookers, err := l.Bookings(context.Background(), staff, 1); err != nil || len(bookers) != 1 {
-		t.Fatalf("owner: bookers = %+v, err = %v; want Ana", bookers, err)
+	page, err = l.Bookings(context.Background(), staff, 1)
+	if err != nil || len(page.Upcoming) != 1 || len(page.Upcoming[0].Bookers) != 1 {
+		t.Fatalf("owner: page = %+v, err = %v; want Ana", page, err)
 	}
 }
 

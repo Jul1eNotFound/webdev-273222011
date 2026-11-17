@@ -4,6 +4,7 @@ package servicetest
 import (
 	"context"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,13 +22,18 @@ type Store struct {
 	users    map[string]store.User
 	sessions map[string]session
 	Labs     []store.Lab
-	// Bookers lists, per lab id, the students who booked it.
+	// LabSessions are the labs' scheduled sessions (Slice 3b).
+	LabSessions []LabSession
+	// Bookers lists, per session id, the students who booked it.
 	Bookers map[int64][]store.Booker
 
-	ErrUserByEmail, ErrCreateSession, ErrSessionUser, ErrDeleteSession, ErrLabs error
-	ErrCreateLab, ErrLabByID, ErrLabBookers, ErrBookLab, ErrLabsOwnedBy         error
+	ErrUserByEmail, ErrCreateSession, ErrSessionUser, ErrDeleteSession error
+	// ErrLabs makes SessionsBetween fail: the query behind the lab list.
+	ErrLabs, ErrCreateLab, ErrLabByID, ErrLabsOwnedBy                   error
+	ErrSessionsOfLab, ErrSessionBookers, ErrAddSessions, ErrBookSession error
 
-	// booked holds the (user id, lab id) pairs booked through BookLab, like the unique constraint on bookings.
+	// booked holds the (user id, session id) pairs booked through BookSession, like the unique
+	// constraint on bookings.
 	booked map[[2]int64]bool
 }
 
@@ -36,13 +42,6 @@ func NewStore() *Store {
 		users: map[string]store.User{}, sessions: map[string]session{},
 		Bookers: map[int64][]store.Booker{}, booked: map[[2]int64]bool{},
 	}
-}
-
-// LabCount returns how many labs are stored, like counting rows in labs.
-func (s *Store) LabCount() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.Labs)
 }
 
 func (s *Store) AddUser(u store.User) {
@@ -113,45 +112,150 @@ func (s *Store) DeleteSession(_ context.Context, idHash []byte) error {
 	return nil
 }
 
-func (s *Store) LabsAvailableBetween(_ context.Context, from, to time.Time) ([]store.Lab, error) {
+// LabSession is a lab_sessions row in the fake store.
+type LabSession struct {
+	ID          int64
+	LabID       int64
+	StartsAt    time.Time
+	EndsAt      time.Time
+	CancelledAt *time.Time
+}
+
+// LabCount returns how many labs are stored, like counting rows in labs.
+func (s *Store) LabCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.Labs)
+}
+
+// SessionCount returns how many sessions a lab has, like counting its rows in lab_sessions.
+func (s *Store) SessionCount(labID int64) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, x := range s.LabSessions {
+		if x.LabID == labID {
+			n++
+		}
+	}
+	return n
+}
+
+// lab returns the lab with its owner's name, as the real join does. The caller holds the mutex.
+func (s *Store) lab(id int64) (store.Lab, bool) {
+	for _, l := range s.Labs {
+		if l.ID == id {
+			for _, u := range s.users {
+				if u.ID == l.OwnerID {
+					l.OwnerName = u.Name
+				}
+			}
+			return l, true
+		}
+	}
+	return store.Lab{}, false
+}
+
+// view joins a session with its lab and counts its bookings, as sessionColumns does. The caller holds the mutex.
+func (s *Store) view(x LabSession) store.SessionView {
+	l, _ := s.lab(x.LabID)
+	return store.SessionView{
+		SessionID: x.ID, LabID: l.ID, Title: l.Title, Description: l.Description, PlaceLimit: l.PlaceLimit,
+		OwnerID: l.OwnerID, OwnerName: l.OwnerName, StartsAt: x.StartsAt, EndsAt: x.EndsAt,
+		CancelledAt: x.CancelledAt, Booked: len(s.Bookers[x.ID]),
+	}
+}
+
+// sorted returns the sessions in time order, as the real queries do. The caller holds the mutex.
+func (s *Store) sorted() []LabSession {
+	out := slices.Clone(s.LabSessions)
+	slices.SortStableFunc(out, func(a, b LabSession) int { return a.StartsAt.Compare(b.StartsAt) })
+	return out
+}
+
+func (s *Store) SessionsBetween(_ context.Context, from, to time.Time) ([]store.SessionView, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ErrLabs != nil {
 		return nil, s.ErrLabs
 	}
-	var out []store.Lab
-	for _, l := range s.Labs {
-		if l.StartsAt.Before(to) && l.EndsAt.After(from) {
-			out = append(out, s.shown(l))
+	var out []store.SessionView
+	for _, x := range s.sorted() {
+		if x.StartsAt.Before(to) && x.EndsAt.After(from) {
+			out = append(out, s.view(x))
 		}
 	}
 	return out, nil
 }
 
-// shown fills in what the real queries join or count: the owner's name and the number of bookings.
-// The caller holds the mutex.
-func (s *Store) shown(l store.Lab) store.Lab {
-	l.Booked = len(s.Bookers[l.ID])
-	for _, u := range s.users {
-		if u.ID == l.OwnerID {
-			l.OwnerName = u.Name
+func (s *Store) SessionsOfLab(_ context.Context, labID int64) ([]store.SessionView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrSessionsOfLab != nil {
+		return nil, s.ErrSessionsOfLab
+	}
+	var out []store.SessionView
+	for _, x := range s.sorted() {
+		if x.LabID == labID {
+			out = append(out, s.view(x))
 		}
 	}
-	return l
+	return out, nil
 }
 
-func (s *Store) LabsOwnedBy(_ context.Context, ownerID int64) ([]store.Lab, error) {
+func (s *Store) SessionBookers(_ context.Context, labID int64) ([]store.SessionBooker, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrSessionBookers != nil {
+		return nil, s.ErrSessionBookers
+	}
+	var out []store.SessionBooker
+	for _, x := range s.sorted() {
+		if x.LabID == labID {
+			for _, b := range s.Bookers[x.ID] {
+				out = append(out, store.SessionBooker{SessionID: x.ID, Booker: b})
+			}
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) LabsOwnedBy(_ context.Context, ownerID int64, now time.Time) ([]store.OwnedLab, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.ErrLabsOwnedBy != nil {
 		return nil, s.ErrLabsOwnedBy
 	}
-	var out []store.Lab
+	var out []store.OwnedLab
 	for _, l := range s.Labs {
-		if l.OwnerID == ownerID {
-			out = append(out, s.shown(l))
+		if l.OwnerID != ownerID {
+			continue
 		}
+		o := store.OwnedLab{}
+		o.Lab, _ = s.lab(l.ID)
+		for _, x := range s.sorted() {
+			if x.LabID != l.ID {
+				continue
+			}
+			o.Sessions++
+			if o.Next == nil && x.EndsAt.After(now) && x.CancelledAt == nil {
+				o.Next = &store.Period{StartsAt: x.StartsAt, EndsAt: x.EndsAt}
+			}
+		}
+		out = append(out, o)
 	}
+	// Labs with a next session first, soonest first, then by title, as the real query orders them.
+	slices.SortStableFunc(out, func(a, b store.OwnedLab) int {
+		switch {
+		case a.Next != nil && b.Next != nil && !a.Next.StartsAt.Equal(b.Next.StartsAt):
+			return a.Next.StartsAt.Compare(b.Next.StartsAt)
+		case a.Next != nil && b.Next == nil:
+			return -1
+		case a.Next == nil && b.Next != nil:
+			return 1
+		}
+		return strings.Compare(a.Title, b.Title)
+	})
 	return out, nil
 }
 
@@ -180,33 +284,66 @@ func (s *Store) LabByID(_ context.Context, id int64) (store.Lab, error) {
 	if s.ErrLabByID != nil {
 		return store.Lab{}, s.ErrLabByID
 	}
-	for _, l := range s.Labs {
-		if l.ID == id {
-			return s.shown(l), nil
-		}
+	if l, ok := s.lab(id); ok {
+		return l, nil
 	}
 	return store.Lab{}, store.ErrNotFound
 }
 
-// BookLab holds the mutex throughout, so it is as atomic as the real store's locked transaction.
-func (s *Store) BookLab(_ context.Context, userID, labID int64, check store.BookingCheck) (store.Lab, error) {
+// AddSessions refuses an overlap with a live session of the lab, or within the batch, and then adds
+// nothing, like the exclusion constraint inside the real store's transaction.
+func (s *Store) AddSessions(_ context.Context, labID int64, periods []store.Period) ([]int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.ErrBookLab != nil {
-		return store.Lab{}, s.ErrBookLab
+	if s.ErrAddSessions != nil {
+		return nil, s.ErrAddSessions
 	}
-	i := slices.IndexFunc(s.Labs, func(l store.Lab) bool { return l.ID == labID })
+	if _, ok := s.lab(labID); !ok {
+		return nil, store.ErrNotFound
+	}
+	var maxID int64
+	taken := []store.Period{}
+	for _, x := range s.LabSessions {
+		maxID = max(maxID, x.ID)
+		if x.LabID == labID && x.CancelledAt == nil {
+			taken = append(taken, store.Period{StartsAt: x.StartsAt, EndsAt: x.EndsAt})
+		}
+	}
+	for _, p := range periods {
+		for _, t := range taken {
+			if p.StartsAt.Before(t.EndsAt) && t.StartsAt.Before(p.EndsAt) {
+				return nil, store.ErrOverlap
+			}
+		}
+		taken = append(taken, p)
+	}
+	ids := make([]int64, len(periods))
+	for i, p := range periods {
+		maxID++
+		ids[i] = maxID
+		s.LabSessions = append(s.LabSessions, LabSession{ID: maxID, LabID: labID, StartsAt: p.StartsAt, EndsAt: p.EndsAt})
+	}
+	return ids, nil
+}
+
+// BookSession holds the mutex throughout, so it is as atomic as the real store's locked transaction.
+func (s *Store) BookSession(_ context.Context, userID, sessionID int64, check store.BookingCheck) (store.SessionView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrBookSession != nil {
+		return store.SessionView{}, s.ErrBookSession
+	}
+	i := slices.IndexFunc(s.LabSessions, func(x LabSession) bool { return x.ID == sessionID })
 	if i < 0 {
-		return store.Lab{}, store.ErrNotFound
+		return store.SessionView{}, store.ErrNotFound
 	}
-	lab := s.Labs[i]
-	lab.Booked = len(s.Bookers[labID])
-	key := [2]int64{userID, labID}
-	if err := check(lab, s.booked[key]); err != nil {
-		return store.Lab{}, err
+	v := s.view(s.LabSessions[i])
+	key := [2]int64{userID, sessionID}
+	if err := check(v, s.booked[key]); err != nil {
+		return store.SessionView{}, err
 	}
 	if s.booked[key] {
-		return store.Lab{}, store.ErrDuplicate
+		return store.SessionView{}, store.ErrDuplicate
 	}
 	s.booked[key] = true
 	var b store.Booker
@@ -215,16 +352,7 @@ func (s *Store) BookLab(_ context.Context, userID, labID int64, check store.Book
 			b = store.Booker{Name: u.Name, Email: u.Email}
 		}
 	}
-	s.Bookers[labID] = append(s.Bookers[labID], b)
-	lab.Booked++
-	return lab, nil
-}
-
-func (s *Store) LabBookers(_ context.Context, labID int64) ([]store.Booker, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.ErrLabBookers != nil {
-		return nil, s.ErrLabBookers
-	}
-	return s.Bookers[labID], nil
+	s.Bookers[sessionID] = append(s.Bookers[sessionID], b)
+	v.Booked++
+	return v, nil
 }

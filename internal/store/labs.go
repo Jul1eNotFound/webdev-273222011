@@ -9,57 +9,59 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// pgUniqueViolation is PostgreSQL's SQLSTATE for a broken unique constraint.
-const pgUniqueViolation = "23505"
+// PostgreSQL error codes the store turns into its own errors.
+const (
+	pgUniqueViolation     = "23505"
+	pgForeignKeyViolation = "23503"
+	pgExclusionViolation  = "23P01"
+)
 
+// Lab is what a lab is apart from its schedule: its sessions carry the time periods (Slice 3b).
 type Lab struct {
 	ID          int64
 	Title       string
 	Description string
-	StartsAt    time.Time
-	EndsAt      time.Time
 	PlaceLimit  int
 	// OwnerID is the staff member who added the lab (AC-60).
 	OwnerID int64
-	// OwnerName is the owner's name, filled in by the queries that list or show labs.
+	// OwnerName is the owner's name, filled in by the queries that show labs.
 	OwnerName string
-	// Booked is the lab's number of bookings rows, filled in by the queries that say so.
-	Booked int
 }
 
-// Booker is a student who booked a lab.
+// Booker is a student who booked a session.
 type Booker struct {
 	Name  string
 	Email string
 }
 
-// labColumns is what every query that shows labs selects, in the order scanLab reads it.
-const labColumns = `l.id, l.title, l.description, l.starts_at, l.ends_at, l.place_limit, l.owner_id, o.name,
-	(SELECT count(*) FROM bookings b WHERE b.lab_id = l.id)`
+// OwnedLab is a lab on its owner's "My labs" page.
+type OwnedLab struct {
+	Lab
+	// Sessions counts all of the lab's sessions, past and cancelled ones included.
+	Sessions int
+	// Next is the lab's next live session that has not ended, or nil.
+	Next *Period
+}
+
+// labColumns is what every query that shows a lab selects, in the order scanLab reads it.
+const labColumns = `l.id, l.title, l.description, l.place_limit, l.owner_id, o.name`
 
 // labsWithOwner is the FROM clause that goes with labColumns.
 const labsWithOwner = `labs l JOIN users o ON o.id = l.owner_id`
 
 func scanLab(row pgx.Row) (Lab, error) {
 	var l Lab
-	err := row.Scan(&l.ID, &l.Title, &l.Description, &l.StartsAt, &l.EndsAt, &l.PlaceLimit, &l.OwnerID, &l.OwnerName, &l.Booked)
+	err := row.Scan(&l.ID, &l.Title, &l.Description, &l.PlaceLimit, &l.OwnerID, &l.OwnerName)
 	return l, err
-}
-
-func collectLabs(rows pgx.Rows, err error) ([]Lab, error) {
-	if err != nil {
-		return nil, err
-	}
-	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Lab, error) { return scanLab(row) })
 }
 
 // CreateLab inserts a lab and returns it with its id. A title that is already taken gives ErrDuplicate.
 func (s *Store) CreateLab(ctx context.Context, l Lab) (Lab, error) {
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO labs (title, description, starts_at, ends_at, place_limit, owner_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO labs (title, description, place_limit, owner_id)
+		VALUES ($1, $2, $3, $4)
 		RETURNING id`,
-		l.Title, l.Description, l.StartsAt, l.EndsAt, l.PlaceLimit, l.OwnerID).Scan(&l.ID)
+		l.Title, l.Description, l.PlaceLimit, l.OwnerID).Scan(&l.ID)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
 		return Lab{}, ErrDuplicate
@@ -70,7 +72,7 @@ func (s *Store) CreateLab(ctx context.Context, l Lab) (Lab, error) {
 	return l, nil
 }
 
-// LabByID returns one lab with its owner's name and its number of bookings.
+// LabByID returns one lab with its owner's name.
 func (s *Store) LabByID(ctx context.Context, id int64) (Lab, error) {
 	l, err := scanLab(s.db.QueryRow(ctx, `SELECT `+labColumns+` FROM `+labsWithOwner+` WHERE l.id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -79,49 +81,45 @@ func (s *Store) LabByID(ctx context.Context, id int64) (Lab, error) {
 	return l, err
 }
 
-// LabBookers returns the students who booked a lab, ordered by name.
-func (s *Store) LabBookers(ctx context.Context, labID int64) ([]Booker, error) {
+// LabsOwnedBy returns the labs a staff member owns, each with its number of sessions and its next live
+// session that has not ended by now (AC-62). Labs with a next session come first, soonest first.
+func (s *Store) LabsOwnedBy(ctx context.Context, ownerID int64, now time.Time) ([]OwnedLab, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT u.name, u.email
-		FROM bookings b
-		JOIN users u ON u.id = b.user_id
-		WHERE b.lab_id = $1
-		ORDER BY u.name, u.email`, labID)
+		SELECT `+labColumns+`,
+		       (SELECT count(*) FROM lab_sessions s WHERE s.lab_id = l.id),
+		       n.starts_at, n.ends_at
+		FROM `+labsWithOwner+`
+		LEFT JOIN LATERAL (
+			SELECT s.starts_at, s.ends_at FROM lab_sessions s
+			WHERE s.lab_id = l.id AND s.ends_at > $2 AND s.cancelled_at IS NULL
+			ORDER BY s.starts_at
+			LIMIT 1
+		) n ON true
+		WHERE l.owner_id = $1
+		ORDER BY n.starts_at NULLS LAST, l.title`, ownerID, now)
 	if err != nil {
 		return nil, err
 	}
-	return pgx.CollectRows(rows, pgx.RowToStructByPos[Booker])
-}
-
-// LabsAvailableBetween returns labs whose time period overlaps [from, to), each with its owner's name
-// and its number of bookings.
-func (s *Store) LabsAvailableBetween(ctx context.Context, from, to time.Time) ([]Lab, error) {
-	return collectLabs(s.db.Query(ctx, `
-		SELECT `+labColumns+`
-		FROM `+labsWithOwner+`
-		WHERE l.starts_at < $2 AND l.ends_at > $1
-		ORDER BY l.starts_at, l.title`, from, to))
-}
-
-// LabsOwnedBy returns the labs a staff member owns, each with its number of bookings (AC-62).
-func (s *Store) LabsOwnedBy(ctx context.Context, ownerID int64) ([]Lab, error) {
-	return collectLabs(s.db.Query(ctx, `
-		SELECT `+labColumns+`
-		FROM `+labsWithOwner+`
-		WHERE l.owner_id = $1
-		ORDER BY l.starts_at, l.title`, ownerID))
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (OwnedLab, error) {
+		var o OwnedLab
+		var from, to *time.Time
+		err := row.Scan(&o.ID, &o.Title, &o.Description, &o.PlaceLimit, &o.OwnerID, &o.OwnerName, &o.Sessions, &from, &to)
+		if from != nil && to != nil {
+			o.Next = &Period{StartsAt: *from, EndsAt: *to}
+		}
+		return o, err
+	})
 }
 
 // UpsertLab creates or refreshes a seeded lab, matched on title, and returns its id.
 func (s *Store) UpsertLab(ctx context.Context, l Lab) (int64, error) {
 	var id int64
 	err := s.db.QueryRow(ctx, `
-		INSERT INTO labs (title, description, starts_at, ends_at, place_limit, owner_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO labs (title, description, place_limit, owner_id)
+		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (title) DO UPDATE
-		SET description = EXCLUDED.description, starts_at = EXCLUDED.starts_at,
-		    ends_at = EXCLUDED.ends_at, place_limit = EXCLUDED.place_limit, owner_id = EXCLUDED.owner_id
+		SET description = EXCLUDED.description, place_limit = EXCLUDED.place_limit, owner_id = EXCLUDED.owner_id
 		RETURNING id`,
-		l.Title, l.Description, l.StartsAt, l.EndsAt, l.PlaceLimit, l.OwnerID).Scan(&id)
+		l.Title, l.Description, l.PlaceLimit, l.OwnerID).Scan(&id)
 	return id, err
 }

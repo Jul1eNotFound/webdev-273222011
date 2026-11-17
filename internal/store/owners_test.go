@@ -55,7 +55,8 @@ func TestAC60_DB_MigrationGivesExistingLabsTheFirstStaffAccount(t *testing.T) {
 		t.Fatalf("migrate up: %v", err)
 	}
 	stella := id("stella@labwiz.test")
-	labs, err := store.New(pool).LabsOwnedBy(ctx, stella)
+	st := store.New(pool)
+	labs, err := st.LabsOwnedBy(ctx, stella, now.Add(-time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,8 +67,16 @@ func TestAC60_DB_MigrationGivesExistingLabsTheFirstStaffAccount(t *testing.T) {
 		if l.OwnerName != "stella@labwiz.test" {
 			t.Errorf("%s: owner = %q", l.Title, l.OwnerName)
 		}
-		if want := map[string]int{"Optics": 1, "Circuits": 0}[l.Title]; l.Booked != want {
-			t.Errorf("%s: bookings = %d, want %d", l.Title, l.Booked, want)
+		// Migration 000004 then made each lab's period its one session (AC-66).
+		sessions, err := st.SessionsOfLab(ctx, l.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sessions) != 1 {
+			t.Fatalf("%s: %d sessions, want 1", l.Title, len(sessions))
+		}
+		if want := map[string]int{"Optics": 1, "Circuits": 0}[l.Title]; sessions[0].Booked != want {
+			t.Errorf("%s: bookings = %d, want %d", l.Title, sessions[0].Booked, want)
 		}
 	}
 	if n := storetest.Count(t, pool, "bookings"); n != 1 {
@@ -79,9 +88,8 @@ func TestAC60_DB_MigrationGivesExistingLabsTheFirstStaffAccount(t *testing.T) {
 func TestAC60_DB_LabsMustHaveAnExistingOwner(t *testing.T) {
 	pool := storetest.Open(t)
 	st := store.New(pool)
-	now := time.Now()
 	for name, owner := range map[string]int64{"no owner": 0, "unknown owner": 999999} {
-		if _, err := st.CreateLab(context.Background(), store.Lab{Title: name, StartsAt: now, EndsAt: now.Add(time.Hour), PlaceLimit: 1, OwnerID: owner}); err == nil {
+		if _, err := st.CreateLab(context.Background(), store.Lab{Title: name, PlaceLimit: 1, OwnerID: owner}); err == nil {
 			t.Errorf("%s: lab was created", name)
 		}
 	}

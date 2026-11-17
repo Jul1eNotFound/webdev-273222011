@@ -33,12 +33,13 @@
 {{/* The owner of a lab (AC-61). */}}
 {{define "owner"}}<span class="lab-card__owner">Run by {{.OwnerName}}</span>{{end}}
 
-{{/* Free places of a service.LabCard. The booking script rewrites the text after a booking. */}}
+{{/* Free places of a service.SessionCard. The booking script rewrites the text after a booking. */}}
 {{define "freePlaces"}}<span class="lab-card__free" data-free-places>{{.FreePlaces}} of {{.PlaceLimit}} places free</span>{{end}}
 
-{{/* The Book button of a service.LabCard: a real form, so it works without the script too (AC-8). */}}
+{{/* The Book button of a service.SessionCard: a real form, so it works without the script too (AC-8).
+     It is disabled as "Closed" once the session has started (AC-83), and as "Full" when no place is left. */}}
 {{define "bookForm"}}
-<form method="post" action="/labs/{{.ID}}/book" class="book-form">
-  {{if gt .FreePlaces 0}}<button type="submit" class="button" aria-describedby="lab-{{.ID}}-title">Book</button>{{else}}<button type="submit" class="button" aria-describedby="lab-{{.ID}}-title" disabled>Full</button>{{end}}
+<form method="post" action="/sessions/{{.SessionID}}/book" class="book-form">
+  {{if .Started}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Closed</button>{{else if gt .FreePlaces 0}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title">Book</button>{{else}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Full</button>{{end}}
 </form>
 {{end}}

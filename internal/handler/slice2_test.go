@@ -46,12 +46,14 @@ func signedIn(t *testing.T, base, email, password string) *http.Client {
 	return c
 }
 
-// labForm is a valid add-lab form for a lab on the fixed clock's day.
+// labForm is a valid add-lab form. A lab has no time period: its sessions do.
 func labForm(title, limit string) url.Values {
-	return url.Values{
-		"title": {title}, "description": {"Lenses and lasers."},
-		"starts": {"2026-10-22T14:00"}, "ends": {"2026-10-22T16:00"}, "place_limit": {limit},
-	}
+	return url.Values{"title": {title}, "description": {"Lenses and lasers."}, "place_limit": {limit}}
+}
+
+// sessionForm is a valid add-session form for 14:00–16:00 on the fixed clock's day.
+func sessionForm() url.Values {
+	return url.Values{"starts": {"2026-10-22T14:00"}, "ends": {"2026-10-22T16:00"}}
 }
 
 func wantStatus(t *testing.T, r response, status int, sentence string) {
@@ -76,12 +78,17 @@ func TestAC12_StaffAddsLabAndItAppearsOnLabs(t *testing.T) {
 	}
 
 	detail := do(t, c, http.MethodGet, base+"/staff/labs/4?created=1", nil)
-	for _, want := range []string{"Lab added.", "Optics", "Lenses and lasers.", "14:00–16:00", "0 of 1 places booked", "No one has booked this lab yet."} {
+	for _, want := range []string{"Lab added. Add its first session below.", "Optics", "Lenses and lasers.", "No upcoming sessions."} {
 		wantStatus(t, detail, http.StatusOK, want)
 	}
 	if strings.Contains(do(t, c, http.MethodGet, base+"/staff/labs/4", nil).body, "Lab added.") {
 		t.Error("the success message shows without ?created=1")
 	}
+	// It appears on /labs once it has a session today (AC-67).
+	if strings.Contains(do(t, c, http.MethodGet, base+"/labs", nil).body, "Optics") {
+		t.Error("a lab with no session is on /labs")
+	}
+	wantRedirect(t, do(t, c, http.MethodPost, base+"/staff/labs/4/sessions", sessionForm()), http.StatusSeeOther, "/staff/labs/4?scheduled=1")
 	wantStatus(t, do(t, c, http.MethodGet, base+"/labs", nil), http.StatusOK, "Optics")
 }
 
@@ -175,10 +182,9 @@ func TestStaffLabPageUnknownLabIs404(t *testing.T) {
 func TestStaffLabPageShowsAPeriodAcrossDays(t *testing.T) {
 	base, _ := newStaffApp(t)
 	c := signedIn(t, base, staffEmail, staffPass)
-	form := labForm("Night lab", "4")
-	form.Set("starts", "2026-10-22T22:00")
-	form.Set("ends", "2026-10-23T02:00")
-	wantRedirect(t, do(t, c, http.MethodPost, base+"/staff/labs/new", form), http.StatusSeeOther, "/staff/labs/4?created=1")
+	wantRedirect(t, do(t, c, http.MethodPost, base+"/staff/labs/new", labForm("Night lab", "4")), http.StatusSeeOther, "/staff/labs/4?created=1")
+	form := url.Values{"starts": {"2026-10-22T22:00"}, "ends": {"2026-10-23T02:00"}}
+	wantRedirect(t, do(t, c, http.MethodPost, base+"/staff/labs/4/sessions", form), http.StatusSeeOther, "/staff/labs/4?scheduled=1")
 	wantStatus(t, do(t, c, http.MethodGet, base+"/staff/labs/4", nil), http.StatusOK, "22 Oct 22:00 – 23 Oct 02:00")
 }
 
@@ -210,14 +216,18 @@ func TestAC30_StaffPagesHaveNoAnimationThemeToggleOrLanguageSwitcher(t *testing.
 
 func TestAC41_AddLabFormFieldsHaveLabels(t *testing.T) {
 	base, _ := newStaffApp(t)
-	body := do(t, signedIn(t, base, staffEmail, staffPass), http.MethodGet, base+"/staff/labs/new", nil).body
-	ids := regexp.MustCompile(`<(?:input|textarea|select) id="([^"]+)"`).FindAllStringSubmatch(body, -1)
-	if len(ids) != 5 {
-		t.Fatalf("found %d fields on /staff/labs/new, want 5", len(ids))
-	}
-	for _, m := range ids {
-		if !strings.Contains(body, `<label for="`+m[1]+`">`) {
-			t.Errorf("field %q has no label", m[1])
+	c := signedIn(t, base, staffEmail, staffPass)
+	// The add-lab form (title, description, place limit) and the add-session form (starts, ends, repeat).
+	for path, want := range map[string]int{"/staff/labs/new": 3, "/staff/labs/1": 3} {
+		body := do(t, c, http.MethodGet, base+path, nil).body
+		ids := regexp.MustCompile(`<(?:input|textarea|select) id="([^"]+)"`).FindAllStringSubmatch(body, -1)
+		if len(ids) != want {
+			t.Fatalf("found %d fields on %s, want %d", len(ids), path, want)
+		}
+		for _, m := range ids {
+			if !strings.Contains(body, `<label for="`+m[1]+`">`) {
+				t.Errorf("%s: field %q has no label", path, m[1])
+			}
 		}
 	}
 }
@@ -284,7 +294,7 @@ func TestAC43_StaffFailuresShowOneReadableSentence(t *testing.T) {
 		{"duplicate", staff, http.MethodPost, "/staff/labs/new", labForm("Chemistry basics", "5"), nil, http.StatusConflict, msgChooseTitle},
 		{"add fails", staff, http.MethodPost, "/staff/labs/new", labForm("Optics", "5"), func() { st.ErrCreateLab = sqlErr },
 			http.StatusInternalServerError, "Something went wrong on our side. Please try again."},
-		{"bookers fail", staff, http.MethodGet, "/staff/labs/1", nil, func() { st.ErrLabBookers = sqlErr },
+		{"bookers fail", staff, http.MethodGet, "/staff/labs/1", nil, func() { st.ErrSessionBookers = sqlErr },
 			http.StatusInternalServerError, "Something went wrong on our side. Please try again."},
 	}
 	leak := regexp.MustCompile(`SQLSTATE|ERROR:|relation|goroutine|panic|\{"`)

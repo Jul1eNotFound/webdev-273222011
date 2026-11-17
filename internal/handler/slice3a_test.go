@@ -31,9 +31,8 @@ func newTwoStaffApp(t *testing.T) (string, *servicetest.Store) {
 	}
 	st.AddUser(store.User{ID: omarID, Email: omarEmail, Name: "Omar Haddad", PasswordHash: string(hash), Role: "staff"})
 	day := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
-	st.Labs = append(st.Labs, store.Lab{
-		ID: 4, Title: "Soldering practice", StartsAt: day.Add(10 * time.Hour), EndsAt: day.Add(11 * time.Hour), PlaceLimit: 5, OwnerID: omarID,
-	})
+	st.Labs = append(st.Labs, store.Lab{ID: 4, Title: "Soldering practice", PlaceLimit: 5, OwnerID: omarID})
+	st.LabSessions = append(st.LabSessions, servicetest.LabSession{ID: 4, LabID: 4, StartsAt: day.Add(10 * time.Hour), EndsAt: day.Add(11 * time.Hour)})
 	return base, st
 }
 
@@ -50,10 +49,10 @@ func TestAC61_LabsShowTheirOwner(t *testing.T) {
 func TestAC62_MyLabsListsExactlyTheCallersLabs(t *testing.T) {
 	base, _ := newTwoStaffApp(t)
 	stella := do(t, signedIn(t, base, staffEmail, staffPass), http.MethodGet, base+"/staff/labs", nil)
-	// Robotics intro starts tomorrow: My labs is not limited to today.
+	// Robotics intro's session is tomorrow: My labs is not limited to today.
 	for _, want := range []string{
 		`<a href="/staff/labs/1">Chemistry basics</a>`, `<a href="/staff/labs/2">Circuits workshop</a>`,
-		`<a href="/staff/labs/3">Robotics intro</a>`, "2 of 10 places booked",
+		`<a href="/staff/labs/3">Robotics intro</a>`, "Next: Thu 22 Oct, 09:00–12:00", "Next: Fri 23 Oct, 09:00–12:00",
 	} {
 		wantStatus(t, stella, http.StatusOK, want)
 	}
@@ -69,7 +68,7 @@ func TestAC62_MyLabsListsExactlyTheCallersLabs(t *testing.T) {
 
 func TestAC63_MyLabsWithoutLabsShowsTheEmptyState(t *testing.T) {
 	base, st := newTwoStaffApp(t)
-	st.Labs = st.Labs[:3] // Omar's lab is gone
+	st.Labs, st.LabSessions = st.Labs[:3], st.LabSessions[:3] // Omar's lab is gone
 	r := do(t, signedIn(t, base, omarEmail, omarPass), http.MethodGet, base+"/staff/labs", nil)
 	wantStatus(t, r, http.StatusOK, "You have no labs yet.")
 	wantStatus(t, r, http.StatusOK, `href="/staff/labs/new"`)

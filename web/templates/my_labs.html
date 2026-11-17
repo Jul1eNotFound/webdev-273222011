@@ -1,11 +1,11 @@
 {{define "content"}}
 <h1>My labs</h1>
-{{if .Labs}}
+{{if .MyLabs}}
 <ul class="lab-list">
-  {{range .Labs}}
+  {{range .MyLabs}}
   <li class="lab-list__item">
     <h2 class="lab-card__title"><a href="/staff/labs/{{.ID}}">{{.Title}}</a></h2>
-    <p class="lab-meta"><span class="lab-card__period">{{period .StartsAt .EndsAt}}</span> · {{.Booked}} of {{.PlaceLimit}} places booked</p>
+    <p class="lab-meta">{{with .Next}}Next: {{day .StartsAt}}, {{period .StartsAt .EndsAt}}{{else}}No upcoming sessions{{end}} · {{.Sessions}} {{if eq .Sessions 1}}session{{else}}sessions{{end}} · {{.PlaceLimit}} places each</p>
   </li>
   {{end}}
 </ul>

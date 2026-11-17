@@ -1,21 +1,50 @@
 {{define "content"}}
 {{with .Success}}<p class="message message--success" role="status">{{.}}</p>{{end}}
-{{$bookers := .Bookers}}
-{{with .Lab}}
-<h1>{{.Title}}</h1>
-<p class="lab-meta">{{period .StartsAt .EndsAt}} · {{len $bookers}} of {{.PlaceLimit}} places booked</p>
-{{with .Description}}<p>{{.}}</p>{{end}}
+{{with .Staff}}
+<h1>{{.Lab.Title}}</h1>
+<p class="lab-meta">{{.Lab.PlaceLimit}} places per session</p>
+{{with .Lab.Description}}<p>{{.}}</p>{{end}}
+
+<h2>Add a session</h2>
+{{with $.Error}}<p class="message message--error" role="alert">{{.}}</p>{{end}}
+<form method="post" action="/staff/labs/{{.Lab.ID}}/sessions" class="form">
+  <label for="starts">Starts</label>
+  <input id="starts" name="starts" type="datetime-local" required value="{{$.SessionForm.Starts}}">
+  <label for="ends">Ends</label>
+  <input id="ends" name="ends" type="datetime-local" required value="{{$.SessionForm.Ends}}">
+  <label for="repeat_until">Repeat weekly until (optional)</label>
+  <input id="repeat_until" name="repeat_until" type="date" value="{{$.SessionForm.RepeatUntil}}">
+  <button type="submit" class="button">Add session</button>
+</form>
+
+<h2>Upcoming sessions</h2>
+{{if .Upcoming}}{{template "sessionsByDay" .Upcoming}}{{else}}<p class="empty">No upcoming sessions. Add one above.</p>{{end}}
+{{with .Past}}
+<h2>Past sessions</h2>
+{{template "sessionsByDay" .}}
 {{end}}
-<h2>Booked by</h2>
-{{if .Bookers}}
-<table class="table">
-  <thead><tr><th scope="col">Name</th><th scope="col">Email</th></tr></thead>
-  <tbody>
-    {{range .Bookers}}<tr><td>{{.Name}}</td><td>{{.Email}}</td></tr>{{end}}
-  </tbody>
-</table>
-{{else}}
-<p class="empty">No one has booked this lab yet.</p>
 {{end}}
-<p><a href="/labs">Back to the lab list</a></p>
+<p><a href="/staff/labs">Back to my labs</a> · <a href="/labs">Back to the lab list</a></p>
+{{end}}
+
+{{/* A list of service.SessionBookers under a heading for each date. */}}
+{{define "sessionsByDay"}}
+{{$day := ""}}
+{{range .}}
+{{$d := day .StartsAt}}{{if ne $d $day}}<h3>{{$d}}</h3>{{$day = $d}}{{end}}
+<section class="lab-list__item session">
+  <p class="lab-meta"><strong>{{period .StartsAt .EndsAt}}</strong> · {{.Booked}} of {{.PlaceLimit}} places booked</p>
+  {{if .Bookers}}
+  <table class="table">
+    <caption>Booked by</caption>
+    <thead><tr><th scope="col">Name</th><th scope="col">Email</th></tr></thead>
+    <tbody>
+      {{range .Bookers}}<tr><td>{{.Name}}</td><td>{{.Email}}</td></tr>{{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="empty">No one has booked this session yet.</p>
+  {{end}}
+</section>
+{{end}}
 {{end}}

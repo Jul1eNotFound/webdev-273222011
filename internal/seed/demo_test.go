@@ -47,7 +47,8 @@ func TestDemoSeedsAccountsLabsAndBookingsOnce(t *testing.T) {
 
 	// A second run re-dates the labs but adds nothing (AC-5: no duplicate bookings).
 	seedAll(t, st)
-	for table, before := range map[string]int{"users": users, "labs": labs, "bookings": bookings} {
+	sessions := storetest.Count(t, pool, "lab_sessions")
+	for table, before := range map[string]int{"users": users, "labs": labs, "bookings": bookings, "lab_sessions": sessions} {
 		if after := storetest.Count(t, pool, table); after != before {
 			t.Errorf("%s went from %d to %d on the second run", table, before, after)
 		}
@@ -55,12 +56,12 @@ func TestDemoSeedsAccountsLabsAndBookingsOnce(t *testing.T) {
 
 	var overfull int
 	if err := pool.QueryRow(context.Background(), `
-		SELECT count(*) FROM labs l
-		WHERE (SELECT count(*) FROM bookings b WHERE b.lab_id = l.id) > l.place_limit`).Scan(&overfull); err != nil {
+		SELECT count(*) FROM lab_sessions s JOIN labs l ON l.id = s.lab_id
+		WHERE (SELECT count(*) FROM bookings b WHERE b.session_id = s.id) > l.place_limit`).Scan(&overfull); err != nil {
 		t.Fatal(err)
 	}
 	if overfull != 0 {
-		t.Errorf("%d labs have more bookings than places", overfull)
+		t.Errorf("%d sessions have more bookings than places", overfull)
 	}
 }
 
@@ -83,7 +84,7 @@ func TestDemoGivesAFullLabAndALabPastMidnightToday(t *testing.T) {
 	st := store.New(pool)
 	seedAll(t, st)
 	day := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
-	today, err := st.LabsAvailableBetween(context.Background(), day, day.AddDate(0, 0, 1))
+	today, err := st.SessionsBetween(context.Background(), day, day.AddDate(0, 0, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,5 +125,18 @@ func TestDemoRefusesAnAccountWithoutPassword(t *testing.T) {
 	st := store.New(storetest.Open(t))
 	if err := seed.Demo(context.Background(), st, now, time.UTC, seed.DemoAccounts()); err == nil {
 		t.Fatal("Demo accepted accounts without passwords")
+	}
+}
+
+func TestDemoHasALabThatRunsWeekly_AC67(t *testing.T) {
+	pool := storetest.Open(t)
+	seedAll(t, store.New(pool))
+	var weekly int
+	if err := pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM lab_sessions s JOIN labs l ON l.id = s.lab_id WHERE l.title = 'Pendulum timing'`).Scan(&weekly); err != nil {
+		t.Fatal(err)
+	}
+	if weekly != 3 {
+		t.Errorf("Pendulum timing has %d sessions, want 3 weekly ones", weekly)
 	}
 }

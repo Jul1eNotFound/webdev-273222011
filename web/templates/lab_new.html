@@ -1,16 +1,13 @@
 {{define "content"}}
 <h1>Add a lab</h1>
 {{with .Error}}<p class="message message--error" role="alert">{{.}}</p>{{end}}
+<p>After adding the lab, you schedule its sessions on its page.</p>
 <form method="post" action="/staff/labs/new" class="form">
   <label for="title">Title</label>
   <input id="title" name="title" type="text" required maxlength="200" value="{{.Form.Title}}">
   <label for="description">Description</label>
   <textarea id="description" name="description" rows="4">{{.Form.Description}}</textarea>
-  <label for="starts">Starts</label>
-  <input id="starts" name="starts" type="datetime-local" required value="{{.Form.Starts}}">
-  <label for="ends">Ends</label>
-  <input id="ends" name="ends" type="datetime-local" required value="{{.Form.Ends}}">
-  <label for="place_limit">Place limit</label>
+  <label for="place_limit">Place limit per session</label>
   <input id="place_limit" name="place_limit" type="number" min="1" step="1" required inputmode="numeric" value="{{.Form.PlaceLimit}}">
   <button type="submit" class="button">Add lab</button>
 </form>

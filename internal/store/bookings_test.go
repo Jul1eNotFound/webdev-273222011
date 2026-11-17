@@ -28,18 +28,30 @@ func staffID(t *testing.T, st *store.Store) int64 {
 	return u.ID
 }
 
-// TestAC6_DB_BookLabHoldsTheLabLockWhileTheCheckRuns makes the gap between counting and inserting wide
-// on purpose: every check sleeps before deciding. Without the row lock all of them would count 0 and
-// all would insert. With it, they run one at a time and only the first fits.
-func TestAC6_DB_BookLabHoldsTheLabLockWhileTheCheckRuns(t *testing.T) {
-	pool := storetest.Open(t)
-	st := store.New(pool)
+// labSession creates a lab with one session from now for an hour, and returns the session's id.
+func labSession(t *testing.T, st *store.Store, title string, limit int) int64 {
+	t.Helper()
 	ctx := context.Background()
-	now := time.Now()
-	lab, err := st.CreateLab(ctx, store.Lab{Title: "Last place", StartsAt: now, EndsAt: now.Add(time.Hour), PlaceLimit: 1, OwnerID: staffID(t, st)})
+	lab, err := st.CreateLab(ctx, store.Lab{Title: title, PlaceLimit: limit, OwnerID: staffID(t, st)})
 	if err != nil {
 		t.Fatal(err)
 	}
+	now := time.Now()
+	ids, err := st.AddSessions(ctx, lab.ID, []store.Period{{StartsAt: now, EndsAt: now.Add(time.Hour)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ids[0]
+}
+
+// TestAC6_DB_BookSessionHoldsTheSessionLockWhileTheCheckRuns makes the gap between counting and inserting wide
+// on purpose: every check sleeps before deciding. Without the row lock all of them would count 0 and
+// all would insert. With it, they run one at a time and only the first fits.
+func TestAC6_DB_BookSessionHoldsTheSessionLockWhileTheCheckRuns(t *testing.T) {
+	pool := storetest.Open(t)
+	st := store.New(pool)
+	ctx := context.Background()
+	session := labSession(t, st, "Last place", 1)
 	const n = 5
 	users := make([]int64, n)
 	for i := range n {
@@ -54,9 +66,9 @@ func TestAC6_DB_BookLabHoldsTheLabLockWhileTheCheckRuns(t *testing.T) {
 		users[i] = u.ID
 	}
 
-	slowCheck := func(l store.Lab, mine bool) error {
+	slowCheck := func(s store.SessionView, mine bool) error {
 		time.Sleep(50 * time.Millisecond)
-		if l.Booked >= l.PlaceLimit {
+		if s.Booked >= s.PlaceLimit {
 			return errFull
 		}
 		return nil
@@ -70,7 +82,7 @@ func TestAC6_DB_BookLabHoldsTheLabLockWhileTheCheckRuns(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, errs[i] = st.BookLab(ctx, id, lab.ID, slowCheck)
+			_, errs[i] = st.BookSession(ctx, id, session, slowCheck)
 		}()
 	}
 	close(start)
@@ -93,7 +105,7 @@ func TestAC6_DB_BookLabHoldsTheLabLockWhileTheCheckRuns(t *testing.T) {
 	}
 }
 
-func TestBookLabReportsAMissingLabAndADuplicate_AC47_AC5(t *testing.T) {
+func TestBookSessionReportsAMissingSessionAndADuplicate_AC47_AC5(t *testing.T) {
 	pool := storetest.Open(t)
 	st := store.New(pool)
 	ctx := context.Background()
@@ -104,21 +116,17 @@ func TestBookLabReportsAMissingLabAndADuplicate_AC47_AC5(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allow := func(store.Lab, bool) error { return nil }
-	if _, err := st.BookLab(ctx, u.ID, 999999, allow); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("missing lab: err = %v, want ErrNotFound", err)
+	allow := func(store.SessionView, bool) error { return nil }
+	if _, err := st.BookSession(ctx, u.ID, 999999, allow); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing session: err = %v, want ErrNotFound", err)
 	}
-	now := time.Now()
-	lab, err := st.CreateLab(ctx, store.Lab{Title: "Optics", StartsAt: now, EndsAt: now.Add(time.Hour), PlaceLimit: 5, OwnerID: staffID(t, st)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := st.BookLab(ctx, u.ID, lab.ID, allow)
+	session := labSession(t, st, "Optics", 5)
+	got, err := st.BookSession(ctx, u.ID, session, allow)
 	if err != nil || got.Booked != 1 {
 		t.Fatalf("first booking: lab = %+v, err = %v; want Booked 1", got, err)
 	}
 	// A check that lets a second booking through is stopped by the unique constraint.
-	if _, err := st.BookLab(ctx, u.ID, lab.ID, allow); !errors.Is(err, store.ErrDuplicate) {
+	if _, err := st.BookSession(ctx, u.ID, session, allow); !errors.Is(err, store.ErrDuplicate) {
 		t.Fatalf("second booking: err = %v, want ErrDuplicate", err)
 	}
 	if rows := storetest.Count(t, pool, "bookings"); rows != 1 {

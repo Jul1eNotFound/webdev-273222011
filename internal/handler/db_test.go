@@ -71,7 +71,7 @@ func TestAC18_DB_SeededPasswordsAreStoredAsBcryptHashes(t *testing.T) {
 func TestAC19_DB_BookingWithoutSessionIs401AndBookingsUnchanged(t *testing.T) {
 	base, _, count := newDBApp(t)
 	before := count("bookings")
-	r := do(t, newClient(t), http.MethodPost, base+"/labs/1/book", url.Values{})
+	r := do(t, newClient(t), http.MethodPost, base+"/sessions/1/book", url.Values{})
 	if r.status != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", r.status)
 	}
@@ -94,22 +94,25 @@ func TestAC21_DB_SignOutDeletesTheSessionRow(t *testing.T) {
 	wantRedirect(t, do(t, c, http.MethodGet, base+"/labs", nil), http.StatusSeeOther, "/login")
 }
 
-// seededLabID finds a seeded lab available on the fixed clock's day by its title.
-func seededLabID(t *testing.T, st *store.Store, title string) int64 {
+// seeded finds a seeded lab's session on the fixed clock's day by the lab's title. Tests take the lab's
+// id (staff pages, /labs/{id}) or the session's id (booking, bookings rows) from it explicitly.
+func seeded(t *testing.T, st *store.Store, title string) store.SessionView {
 	t.Helper()
 	day := time.Date(fixedNow.Year(), fixedNow.Month(), fixedNow.Day(), 0, 0, 0, 0, time.UTC)
-	labs, err := st.LabsAvailableBetween(context.Background(), day, day.AddDate(0, 0, 1))
+	sessions, err := st.SessionsBetween(context.Background(), day, day.AddDate(0, 0, 1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, l := range labs {
-		if l.Title == title {
-			return l.ID
+	for _, s := range sessions {
+		if s.Title == title {
+			return s
 		}
 	}
-	t.Fatalf("no seeded lab %q", title)
-	return 0
+	t.Fatalf("no seeded session of %q today", title)
+	return store.SessionView{}
 }
+
+func staffLabPath(labID int64) string { return "/staff/labs/" + strconv.FormatInt(labID, 10) }
 
 func TestAC12_DB_StaffAddsLabAndLabsGainsOneRow(t *testing.T) {
 	base, _, count := newDBApp(t)
@@ -122,7 +125,15 @@ func TestAC12_DB_StaffAddsLabAndLabsGainsOneRow(t *testing.T) {
 	if after := count("labs"); after != before+1 {
 		t.Fatalf("labs went from %d to %d, want one more", before, after)
 	}
+	labPage := strings.TrimSuffix(r.header.Get("Location"), "?created=1")
 	wantStatus(t, do(t, c, http.MethodGet, base+r.header.Get("Location"), nil), http.StatusOK, "Lab added.")
+	// A lab is on /labs once it has a session that day (AC-67).
+	if strings.Contains(do(t, c, http.MethodGet, base+"/labs", nil).body, "Optics") {
+		t.Error("a lab with no session is on /labs")
+	}
+	if s := do(t, c, http.MethodPost, base+labPage+"/sessions", sessionForm()); s.status != http.StatusSeeOther {
+		t.Fatalf("add session = %d\n%s", s.status, s.body)
+	}
 	wantStatus(t, do(t, c, http.MethodGet, base+"/labs", nil), http.StatusOK, "Optics")
 }
 
@@ -177,13 +188,13 @@ func TestAC14_DB_StaffSeesExactlyTheStudentsWhoBooked(t *testing.T) {
 		}
 		return u.ID
 	}
-	chemistry, circuits := seededLabID(t, st, "Chemistry basics"), seededLabID(t, st, "Circuits workshop")
-	storetest.InsertBooking(t, pool, userID(seed.StudentEmail), chemistry)
-	storetest.InsertBooking(t, pool, userID("ana@labwiz.test"), chemistry)
-	storetest.InsertBooking(t, pool, userID("ben@labwiz.test"), circuits)
+	chemistry, circuits := seeded(t, st, "Chemistry basics"), seeded(t, st, "Circuits workshop")
+	storetest.InsertBooking(t, pool, userID(seed.StudentEmail), chemistry.SessionID)
+	storetest.InsertBooking(t, pool, userID("ana@labwiz.test"), chemistry.SessionID)
+	storetest.InsertBooking(t, pool, userID("ben@labwiz.test"), circuits.SessionID)
 
 	c := signedIn(t, base, seed.StaffEmail, seedPasswords.Staff)
-	r := do(t, c, http.MethodGet, base+"/staff/labs/"+strconv.FormatInt(chemistry, 10), nil)
+	r := do(t, c, http.MethodGet, base+staffLabPath(chemistry.LabID), nil)
 	for _, want := range []string{"Sam Student", "Ana Example"} {
 		wantStatus(t, r, http.StatusOK, want)
 	}
@@ -202,11 +213,11 @@ func TestAC45_DB_StudentGetsStaffLabPage403(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chemistry := seededLabID(t, st, "Chemistry basics")
-	storetest.InsertBooking(t, pool, u.ID, chemistry)
+	chemistry := seeded(t, st, "Chemistry basics")
+	storetest.InsertBooking(t, pool, u.ID, chemistry.SessionID)
 
 	c := signedIn(t, base, seed.StudentEmail, seedPasswords.Student)
-	r := do(t, c, http.MethodGet, base+"/staff/labs/"+strconv.FormatInt(chemistry, 10), nil)
+	r := do(t, c, http.MethodGet, base+staffLabPath(chemistry.LabID), nil)
 	wantStatus(t, r, http.StatusForbidden, msgForbidden)
 	if strings.Contains(r.body, labBookersTable) || strings.Contains(r.body, "<table") {
 		t.Error("a student is shown the booking list")
@@ -224,9 +235,9 @@ func TestAC10_DB_LabsShowFreePlacesFromBookingsRows(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		storetest.InsertBooking(t, pool, u.ID, seededLabID(t, st, "Circuits workshop"))
+		storetest.InsertBooking(t, pool, u.ID, seeded(t, st, "Circuits workshop").SessionID)
 		if email == seed.StudentEmail {
-			storetest.InsertBooking(t, pool, u.ID, seededLabID(t, st, "Chemistry basics"))
+			storetest.InsertBooking(t, pool, u.ID, seeded(t, st, "Chemistry basics").SessionID)
 		}
 	}
 

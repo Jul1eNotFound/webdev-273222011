@@ -15,16 +15,17 @@ import (
 )
 
 const (
-	msgBooked        = "Booking confirmed"
-	msgAlreadyBooked = "You have already booked this lab"
-	msgFull          = "This lab is full"
-	msgNotOpen       = "This lab is not open for booking today."
+	msgBooked          = "Booking confirmed"
+	msgAlreadyBooked   = "You have already booked this lab"
+	msgFull            = "This lab is full"
+	msgSessionNotFound = "This session does not exist."
+	msgClosed          = "Booking is closed: this session has already started."
 	// bookForm marks a Book button's form; the page also loads /static/booking.js, so "/book" alone is not enough.
 	bookForm = `class="book-form"`
 )
 
-// In newFakeApp, lab 1 (Chemistry basics, 10 places) and lab 2 (Circuits workshop, 2 places) are
-// available today, and lab 3 (Robotics intro) starts tomorrow.
+// In newFakeApp, session 1 (Chemistry basics, 10 places) and session 2 (Circuits workshop, 2 places) are
+// today, and session 3 (Robotics intro) is tomorrow. Each session's id is its lab's.
 
 type bookingReply struct {
 	status     int
@@ -72,7 +73,7 @@ func fillLab(st *servicetest.Store, labID int64, n int) {
 func TestAC4_ScriptBookingConfirmsAndReturnsTheNewCount(t *testing.T) {
 	base, st := newFakeApp(t)
 	c := signedIn(t, base, studentEmail, studentPass)
-	reply := bookByScript(t, c, base, "/labs/1/book")
+	reply := bookByScript(t, c, base, "/sessions/1/book")
 	if reply.status != http.StatusOK || !strings.Contains(reply.Message, msgBooked) {
 		t.Fatalf("got %d %q, want 200 %q", reply.status, reply.Message, msgBooked)
 	}
@@ -88,7 +89,7 @@ func TestAC4_ScriptBookingConfirmsAndReturnsTheNewCount(t *testing.T) {
 func TestAC4_FormBookingRedirectsToTheLabWithConfirmation(t *testing.T) {
 	base, _ := newFakeApp(t)
 	c := signedIn(t, base, studentEmail, studentPass)
-	wantRedirect(t, bookByForm(t, c, base, "/labs/1/book"), http.StatusSeeOther, "/labs/1?booked=1")
+	wantRedirect(t, bookByForm(t, c, base, "/sessions/1/book"), http.StatusSeeOther, "/labs/1?booked=1")
 	r := do(t, c, http.MethodGet, base+"/labs/1?booked=1", nil)
 	wantStatus(t, r, http.StatusOK, msgBooked)
 	wantStatus(t, r, http.StatusOK, "9 of 10 places free")
@@ -97,9 +98,9 @@ func TestAC4_FormBookingRedirectsToTheLabWithConfirmation(t *testing.T) {
 func TestAC5_SecondBookingIs409(t *testing.T) {
 	base, st := newFakeApp(t)
 	c := signedIn(t, base, studentEmail, studentPass)
-	bookByForm(t, c, base, "/labs/1/book")
-	wantStatus(t, bookByForm(t, c, base, "/labs/1/book"), http.StatusConflict, msgAlreadyBooked)
-	if reply := bookByScript(t, c, base, "/labs/1/book"); reply.status != http.StatusConflict || !strings.Contains(reply.Message, msgAlreadyBooked) {
+	bookByForm(t, c, base, "/sessions/1/book")
+	wantStatus(t, bookByForm(t, c, base, "/sessions/1/book"), http.StatusConflict, msgAlreadyBooked)
+	if reply := bookByScript(t, c, base, "/sessions/1/book"); reply.status != http.StatusConflict || !strings.Contains(reply.Message, msgAlreadyBooked) {
 		t.Fatalf("script: got %d %q", reply.status, reply.Message)
 	}
 	if n := len(st.Bookers[1]); n != 1 {
@@ -111,14 +112,14 @@ func TestAC1_FullLabIs409WithLinksToTheListAndHome(t *testing.T) {
 	base, st := newFakeApp(t)
 	fillLab(st, 2, 2)
 	c := signedIn(t, base, studentEmail, studentPass)
-	r := bookByForm(t, c, base, "/labs/2/book")
+	r := bookByForm(t, c, base, "/sessions/2/book")
 	wantStatus(t, r, http.StatusConflict, msgFull)
 	for _, link := range []string{`href="/labs"`, `href="/"`} {
 		if !strings.Contains(r.body, link) {
 			t.Errorf("the full page has no %s link", link)
 		}
 	}
-	if reply := bookByScript(t, c, base, "/labs/2/book"); reply.status != http.StatusConflict || !strings.Contains(reply.Message, msgFull) {
+	if reply := bookByScript(t, c, base, "/sessions/2/book"); reply.status != http.StatusConflict || !strings.Contains(reply.Message, msgFull) {
 		t.Fatalf("script: got %d %q", reply.status, reply.Message)
 	}
 	if n := len(st.Bookers[2]); n != 2 {
@@ -131,22 +132,22 @@ func TestAC8_FullLabShowsADisabledFullButtonAndRefusesAPost(t *testing.T) {
 	fillLab(st, 2, 2)
 	c := signedIn(t, base, studentEmail, studentPass)
 	r := do(t, c, http.MethodGet, base+"/labs", nil)
-	full := regexp.MustCompile(`action="/labs/2/book"[^<]*<button[^>]*disabled>Full</button>`)
+	full := regexp.MustCompile(`action="/sessions/2/book"[^<]*<button[^>]*disabled>Full</button>`)
 	if !full.MatchString(r.body) {
 		t.Errorf("the full lab has no disabled Full button\n%s", r.body)
 	}
-	open := regexp.MustCompile(`action="/labs/1/book"[^<]*<button[^>]*>Book</button>`)
+	open := regexp.MustCompile(`action="/sessions/1/book"[^<]*<button[^>]*>Book</button>`)
 	if !open.MatchString(r.body) {
 		t.Errorf("the lab with free places has no Book button\n%s", r.body)
 	}
-	wantStatus(t, bookByForm(t, c, base, "/labs/2/book"), http.StatusConflict, msgFull)
+	wantStatus(t, bookByForm(t, c, base, "/sessions/2/book"), http.StatusConflict, msgFull)
 }
 
 func TestAC46_StaffBookingIs403(t *testing.T) {
 	base, st := newStaffApp(t)
 	c := signedIn(t, base, staffEmail, staffPass)
-	wantStatus(t, bookByForm(t, c, base, "/labs/1/book"), http.StatusForbidden, msgForbidden)
-	if reply := bookByScript(t, c, base, "/labs/1/book"); reply.status != http.StatusForbidden {
+	wantStatus(t, bookByForm(t, c, base, "/sessions/1/book"), http.StatusForbidden, msgForbidden)
+	if reply := bookByScript(t, c, base, "/sessions/1/book"); reply.status != http.StatusForbidden {
 		t.Fatalf("script: got %d %q", reply.status, reply.Message)
 	}
 	if n := len(st.Bookers[1]); n != 2 {
@@ -160,27 +161,47 @@ func TestAC46_StaffBookingIs403(t *testing.T) {
 func TestAC47_UnknownLabIs404(t *testing.T) {
 	base, _ := newFakeApp(t)
 	c := signedIn(t, base, studentEmail, studentPass)
-	wantStatus(t, bookByForm(t, c, base, "/labs/999/book"), http.StatusNotFound, msgLabNotFound)
-	wantStatus(t, bookByForm(t, c, base, "/labs/abc/book"), http.StatusNotFound, msgLabNotFound)
+	wantStatus(t, bookByForm(t, c, base, "/sessions/999/book"), http.StatusNotFound, msgSessionNotFound)
+	wantStatus(t, bookByForm(t, c, base, "/sessions/abc/book"), http.StatusNotFound, msgSessionNotFound)
 	wantStatus(t, do(t, c, http.MethodGet, base+"/labs/999", nil), http.StatusNotFound, msgLabNotFound)
 	wantStatus(t, do(t, c, http.MethodGet, base+"/labs/abc", nil), http.StatusNotFound, msgLabNotFound)
-	if reply := bookByScript(t, c, base, "/labs/999/book"); reply.status != http.StatusNotFound || reply.Message != msgLabNotFound {
+	if reply := bookByScript(t, c, base, "/sessions/999/book"); reply.status != http.StatusNotFound || reply.Message != msgSessionNotFound {
 		t.Fatalf("script: got %d %q", reply.status, reply.Message)
 	}
 }
 
-func TestAC48_LabNotAvailableTodayIsRefused(t *testing.T) {
+func TestAC84_SessionTomorrowCanBeBooked(t *testing.T) {
 	base, st := newFakeApp(t)
 	c := signedIn(t, base, studentEmail, studentPass)
-	wantStatus(t, bookByForm(t, c, base, "/labs/3/book"), http.StatusConflict, msgNotOpen)
-	if n := len(st.Bookers[3]); n != 0 {
+	wantRedirect(t, bookByForm(t, c, base, "/sessions/3/book"), http.StatusSeeOther, "/labs/3?booked=1")
+	if n := len(st.Bookers[3]); n != 1 {
+		t.Fatalf("bookings = %d, want 1", n)
+	}
+}
+
+func TestAC83_StartedSessionShowsClosedAndRefusesABooking(t *testing.T) {
+	base, st := newFakeApp(t)
+	st.Labs = append(st.Labs, store.Lab{ID: 4, Title: "Open microscopy", PlaceLimit: 5, OwnerID: stellaID})
+	st.LabSessions = append(st.LabSessions, fakeSession(4, 4, 8, 20)) // started at 08:00; the clock says 08:30
+	c := signedIn(t, base, studentEmail, studentPass)
+	closed := regexp.MustCompile(`action="/sessions/4/book"[^<]*<button[^>]*disabled>Closed</button>`)
+	for _, path := range []string{"/labs", "/labs/4"} {
+		if r := do(t, c, http.MethodGet, base+path, nil); !closed.MatchString(r.body) {
+			t.Errorf("%s has no disabled Closed button for the started session\n%s", path, r.body)
+		}
+	}
+	wantStatus(t, bookByForm(t, c, base, "/sessions/4/book"), http.StatusConflict, msgClosed)
+	if reply := bookByScript(t, c, base, "/sessions/4/book"); reply.status != http.StatusConflict || reply.Message != msgClosed {
+		t.Fatalf("script: got %d %q", reply.status, reply.Message)
+	}
+	if n := len(st.Bookers[4]); n != 0 {
 		t.Fatalf("bookings = %d, want 0", n)
 	}
 }
 
 func TestAC19_ScriptBookingWithoutSessionIs401(t *testing.T) {
 	base, st := newFakeApp(t)
-	reply := bookByScript(t, newClient(t), base, "/labs/1/book")
+	reply := bookByScript(t, newClient(t), base, "/sessions/1/book")
 	if reply.status != http.StatusUnauthorized || reply.Message != "Please sign in to continue." {
 		t.Fatalf("got %d %q", reply.status, reply.Message)
 	}
@@ -234,13 +255,13 @@ func TestAC4_BookingScriptIsServedAndLoaded(t *testing.T) {
 func TestBookingStoreErrorIsAReadable500(t *testing.T) {
 	base, st := newFakeApp(t)
 	c := signedIn(t, base, studentEmail, studentPass)
-	st.ErrBookLab = errors.New(`pq: SQLSTATE 40P01 deadlock detected`)
-	r := bookByForm(t, c, base, "/labs/1/book")
+	st.ErrBookSession = errors.New(`pq: SQLSTATE 40P01 deadlock detected`)
+	r := bookByForm(t, c, base, "/sessions/1/book")
 	wantStatus(t, r, http.StatusInternalServerError, "Something went wrong on our side. Please try again.")
 	if strings.Contains(r.body, "SQLSTATE") {
 		t.Error("the page leaks the database error")
 	}
-	if reply := bookByScript(t, c, base, "/labs/1/book"); reply.status != http.StatusInternalServerError || strings.Contains(reply.Message, "SQLSTATE") {
+	if reply := bookByScript(t, c, base, "/sessions/1/book"); reply.status != http.StatusInternalServerError || strings.Contains(reply.Message, "SQLSTATE") {
 		t.Fatalf("script: got %d %q", reply.status, reply.Message)
 	}
 }

@@ -35,9 +35,11 @@ func DemoAccounts() []Account {
 }
 
 type demoLab struct {
-	lab     store.Lab
-	owner   string   // email of the demo staff member who owns it
-	bookers []string // emails of the demo students who booked it
+	lab   store.Lab
+	owner string // email of the demo staff member who owns it
+	// sessions are the lab's sessions; the first one is the one the demo students booked.
+	sessions []store.Period
+	bookers  []string // emails of the demo students who booked its first session
 }
 
 const (
@@ -45,18 +47,28 @@ const (
 	omar = "omar@labwiz.test"
 )
 
-// demoLabs covers the cases worth seeing by hand: free, nearly full and full labs today, one that
-// runs past midnight, labs on later days, and one that is already over.
+// demoLabs covers the cases worth seeing by hand: free, nearly full and full sessions today, one that
+// runs past midnight, a lab that runs weekly, labs on later days, and one that is already over.
 func demoLabs(now time.Time, loc *time.Location) []demoLab {
 	t := now.In(loc)
 	today := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
 	at := func(day, hour int) time.Time { return today.AddDate(0, 0, day).Add(time.Duration(hour) * time.Hour) }
 	lab := func(owner, title, desc string, from, to time.Time, limit int, bookers ...string) demoLab {
-		return demoLab{store.Lab{Title: title, Description: desc, StartsAt: from, EndsAt: to, PlaceLimit: limit}, owner, bookers}
+		return demoLab{
+			lab: store.Lab{Title: title, Description: desc, PlaceLimit: limit}, owner: owner,
+			sessions: []store.Period{{StartsAt: from, EndsAt: to}}, bookers: bookers,
+		}
+	}
+	weekly := func(d demoLab, weeks int) demoLab {
+		first := d.sessions[0]
+		for w := 1; w < weeks; w++ {
+			d.sessions = append(d.sessions, store.Period{StartsAt: first.StartsAt.AddDate(0, 0, 7*w), EndsAt: first.EndsAt.AddDate(0, 0, 7*w)})
+		}
+		return d
 	}
 	return []demoLab{
-		lab(dana, "Pendulum timing", "Measure g with a pendulum and a stopwatch.", at(0, 10), at(0, 12), 6,
-			"ana@labwiz.test"),
+		weekly(lab(dana, "Pendulum timing", "Measure g with a pendulum and a stopwatch.", at(0, 10), at(0, 12), 6,
+			"ana@labwiz.test"), 3), // every week for three weeks
 		lab(dana, "Biology dissection", "Plant and flower dissection under the stereo microscope.", at(0, 14), at(0, 16), 3,
 			"ana@labwiz.test", "ben@labwiz.test", "chen@labwiz.test"), // full
 		lab(omar, "3D printing basics", "Slice a model and print it in PLA.", at(0, 15), at(0, 18), 4,
@@ -97,8 +109,8 @@ func Demo(ctx context.Context, st *store.Store, now time.Time, loc *time.Locatio
 		}
 		ids[a.Email] = u.ID
 	}
-	skipTaken := func(l store.Lab, mine bool) error {
-		if mine || l.Booked >= l.PlaceLimit {
+	skipTaken := func(s store.SessionView, mine bool) error {
+		if mine || s.Booked >= s.PlaceLimit {
 			return errSkip
 		}
 		return nil
@@ -113,12 +125,22 @@ func Demo(ctx context.Context, st *store.Store, now time.Time, loc *time.Locatio
 		if err != nil {
 			return err
 		}
+		var booked int64
+		for i, p := range d.sessions {
+			id, err := st.EnsureSession(ctx, labID, p)
+			if err != nil {
+				return fmt.Errorf("session of %q: %w", d.lab.Title, err)
+			}
+			if i == 0 {
+				booked = id
+			}
+		}
 		for _, email := range d.bookers {
 			userID, ok := ids[email]
 			if !ok {
 				return fmt.Errorf("demo lab %q is booked by unknown account %s", d.lab.Title, email)
 			}
-			if _, err := st.BookLab(ctx, userID, labID, skipTaken); err != nil && !errors.Is(err, errSkip) {
+			if _, err := st.BookSession(ctx, userID, booked, skipTaken); err != nil && !errors.Is(err, errSkip) {
 				return fmt.Errorf("book %q for %s: %w", d.lab.Title, email, err)
 			}
 		}

@@ -23,11 +23,17 @@ type pageData struct {
 	Error   string
 	Success string
 	Email   string
-	Labs    []service.LabCard
-	Form    service.NewLab
-	Lab     *store.Lab
-	Card    *service.LabCard
-	Bookers []store.Booker
+	// Sessions is the lab list (/labs).
+	Sessions []service.SessionCard
+	// LabPage is one lab and its upcoming sessions (/labs/{id}).
+	LabPage *service.LabPage
+	// Staff is one owned lab with its sessions and who booked them (/staff/labs/{id}).
+	Staff *service.StaffLabPage
+	// MyLabs are the caller's own labs (/staff/labs).
+	MyLabs []store.OwnedLab
+	// Form and SessionForm are what was typed, shown again with a validation message.
+	Form        service.NewLab
+	SessionForm service.NewSession
 }
 
 type renderer struct {
@@ -37,7 +43,7 @@ type renderer struct {
 // newRenderer takes the timezone that lab times are shown in.
 func newRenderer(loc *time.Location) (*renderer, error) {
 	rn := &renderer{pages: map[string]*template.Template{}}
-	funcs := template.FuncMap{"period": period(loc)}
+	funcs := template.FuncMap{"period": period(loc), "day": day(loc)}
 	for _, name := range []string{"login", "labs", "lab", "error", "my_labs", "lab_new", "lab_staff"} {
 		t, err := template.New(name).Funcs(funcs).ParseFS(web.FS, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
@@ -58,6 +64,11 @@ func period(loc *time.Location) func(from, to time.Time) string {
 		}
 		return from.Format("2 Jan 15:04") + " – " + to.Format("2 Jan 15:04")
 	}
+}
+
+// day names a session's date, as in "Thu 22 Oct", for the staff page's date headings.
+func day(loc *time.Location) func(t time.Time) string {
+	return func(t time.Time) string { return t.In(loc).Format("Mon 2 Jan") }
 }
 
 // page renders into a buffer first, so a template error never sends half a page.

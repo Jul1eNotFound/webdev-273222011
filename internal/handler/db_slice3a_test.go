@@ -3,7 +3,6 @@ package handler_test
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -69,16 +68,16 @@ func TestAC62_DB_EachStaffMemberSeesOnlyTheirOwnLabs(t *testing.T) {
 
 func TestAC64_DB_AnotherStaffMembersLabIs403(t *testing.T) {
 	base, st, pool := newDBAppWithPool(t)
-	chemistry := seededLabID(t, st, "Chemistry basics")
-	bookByForm(t, signedIn(t, base, seed.StudentEmail, seedPasswords.Student), base, bookPath(chemistry))
+	chemistry := seeded(t, st, "Chemistry basics")
+	bookByForm(t, signedIn(t, base, seed.StudentEmail, seedPasswords.Student), base, bookPath(chemistry.SessionID))
 	addStaff(t, st, omarEmail, omarPass)
 
-	r := do(t, signedIn(t, base, omarEmail, omarPass), http.MethodGet, base+"/staff/labs/"+strconv.FormatInt(chemistry, 10), nil)
+	r := do(t, signedIn(t, base, omarEmail, omarPass), http.MethodGet, base+staffLabPath(chemistry.LabID), nil)
 	wantStatus(t, r, http.StatusForbidden, msgForbidden)
 	if strings.Contains(r.body, "Sam Student") {
 		t.Error("another staff member sees who booked the lab")
 	}
-	if n := bookingRows(t, pool, chemistry, 0); n != 1 {
+	if n := bookingRows(t, pool, chemistry.SessionID, 0); n != 1 {
 		t.Fatalf("bookings = %d, want 1", n)
 	}
 }

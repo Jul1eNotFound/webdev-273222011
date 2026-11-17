@@ -16,7 +16,9 @@ import (
 	"github.com/Jul1eNotFound/webdev-273222011/internal/service"
 )
 
-var fixedNow = time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)
+// fixedNow is 08:30, so the seeded 09:00 and 13:00 sessions can still be booked (AC-84) while the
+// 08:00–20:00 one has started (AC-83).
+var fixedNow = time.Date(2026, 10, 22, 8, 30, 0, 0, time.UTC)
 
 func clock() time.Time { return fixedNow }
 

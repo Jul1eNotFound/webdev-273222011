@@ -17,23 +17,24 @@ const msgBooked = "Booking confirmed."
 
 func (h *handler) labsPage(w http.ResponseWriter, r *http.Request) {
 	c, _ := auth.CallerFrom(r.Context())
-	labs, err := h.Labs.ListToday(r.Context(), c)
+	sessions, err := h.Labs.ListToday(r.Context(), c)
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	h.page(w, http.StatusOK, "labs", pageData{Title: "Labs · Labwiz", User: &c, Labs: labs})
+	h.page(w, http.StatusOK, "labs", pageData{Title: "Labs · Labwiz", User: &c, Sessions: sessions})
 }
 
-// labPage shows one lab with its free places and, for students, a Book button.
+// labPage shows one lab and its upcoming sessions, each with its free places and, for students, a
+// Book button.
 func (h *handler) labPage(w http.ResponseWriter, r *http.Request) {
 	c, _ := auth.CallerFrom(r.Context())
-	lab, err := h.Labs.Get(r.Context(), c, labID(r))
+	lab, err := h.Labs.Get(r.Context(), c, idParam(r))
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	data := pageData{Title: lab.Title + " · Labwiz", User: &c, Card: &lab}
+	data := pageData{Title: lab.Lab.Title + " · Labwiz", User: &c, LabPage: &lab}
 	if r.URL.Query().Get("booked") == "1" {
 		data.Success = msgBooked
 	}
@@ -47,28 +48,29 @@ type bookingReply struct {
 	PlaceLimit *int   `json:"place_limit,omitempty"`
 }
 
-// book books a place for the signed-in student. The script asks for JSON and updates the page in place
-// (AC-4); a plain form post is redirected to the lab page, or shown the error page (AC-1).
+// book books a place in a session for the signed-in student. The script asks for JSON and updates the
+// page in place (AC-4); a plain form post is redirected to the lab page, or shown the error page (AC-1).
 func (h *handler) book(w http.ResponseWriter, r *http.Request) {
 	c, _ := auth.CallerFrom(r.Context())
-	lab, err := h.Labs.Book(r.Context(), c, labID(r))
+	s, err := h.Labs.Book(r.Context(), c, idParam(r))
 	if !wantsJSON(r) {
 		if err != nil {
 			h.fail(w, r, err)
 			return
 		}
-		http.Redirect(w, r, fmt.Sprintf("/labs/%d?booked=1", lab.ID), http.StatusSeeOther)
+		http.Redirect(w, r, fmt.Sprintf("/labs/%d?booked=1", s.LabID), http.StatusSeeOther)
 		return
 	}
 	if err != nil {
 		h.failJSON(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, bookingReply{Message: msgBooked, FreePlaces: &lab.FreePlaces, PlaceLimit: &lab.PlaceLimit})
+	writeJSON(w, http.StatusOK, bookingReply{Message: msgBooked, FreePlaces: &s.FreePlaces, PlaceLimit: &s.PlaceLimit})
 }
 
-// labID reads the {id} route parameter. Anything that is not a number becomes 0, which matches no lab.
-func labID(r *http.Request) int64 {
+// idParam reads the {id} route parameter, a lab's or a session's. Anything that is not a number becomes
+// 0, which matches nothing, so it ends in the service's 404 (AC-47).
+func idParam(r *http.Request) int64 {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
 		return 0

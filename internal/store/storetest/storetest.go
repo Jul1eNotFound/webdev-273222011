@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -41,18 +42,30 @@ func Open(t testing.TB) *pgxpool.Pool {
 	if err := migrations.Up(url); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `TRUNCATE bookings, sessions, labs, users RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE bookings, lab_sessions, sessions, labs, users RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return pool
 }
 
-// InsertBooking adds a bookings row directly, for tests that need bookings before the booking feature exists.
-func InsertBooking(t testing.TB, pool *pgxpool.Pool, userID, labID int64) {
+// InsertBooking adds a bookings row for one session directly, skipping the booking rules, for tests that
+// need a lab with bookings already in it.
+func InsertBooking(t testing.TB, pool *pgxpool.Pool, userID, sessionID int64) {
 	t.Helper()
-	if _, err := pool.Exec(context.Background(), `INSERT INTO bookings (user_id, lab_id) VALUES ($1, $2)`, userID, labID); err != nil {
+	if _, err := pool.Exec(context.Background(), `INSERT INTO bookings (user_id, session_id) VALUES ($1, $2)`, userID, sessionID); err != nil {
 		t.Fatalf("insert booking: %v", err)
 	}
+}
+
+// InsertSession adds a session to a lab directly and returns its id.
+func InsertSession(t testing.TB, pool *pgxpool.Pool, labID int64, from, to time.Time) int64 {
+	t.Helper()
+	var id int64
+	if err := pool.QueryRow(context.Background(),
+		`INSERT INTO lab_sessions (lab_id, starts_at, ends_at) VALUES ($1, $2, $3) RETURNING id`, labID, from, to).Scan(&id); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	return id
 }
 
 // Warm opens n connections and returns them to the pool idle, as in a server that has been running a

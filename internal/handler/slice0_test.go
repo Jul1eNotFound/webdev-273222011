@@ -23,7 +23,9 @@ const (
 // stellaID is the staff member who owns the fake labs. newStaffApp adds her account.
 const stellaID = 2
 
-// newFakeApp serves the app over the in-memory store: one student, labs today and tomorrow.
+// newFakeApp serves the app over the in-memory store: one student, and three of Stella's labs, each with
+// one session whose id is the lab's: Chemistry basics 09:00–12:00 and Circuits workshop 13:00–17:00 today,
+// Robotics intro tomorrow.
 func newFakeApp(t *testing.T) (string, *servicetest.Store) {
 	t.Helper()
 	hash, err := bcrypt.GenerateFromPassword([]byte(studentPass), bcrypt.MinCost)
@@ -32,13 +34,19 @@ func newFakeApp(t *testing.T) (string, *servicetest.Store) {
 	}
 	st := servicetest.NewStore()
 	st.AddUser(store.User{ID: 1, Email: studentEmail, Name: "Sam Student", PasswordHash: string(hash), Role: "student"})
-	day := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
 	st.Labs = []store.Lab{
-		{ID: 1, Title: "Chemistry basics", StartsAt: day.Add(9 * time.Hour), EndsAt: day.Add(12 * time.Hour), PlaceLimit: 10, OwnerID: stellaID},
-		{ID: 2, Title: "Circuits workshop", StartsAt: day.Add(13 * time.Hour), EndsAt: day.Add(17 * time.Hour), PlaceLimit: 2, OwnerID: stellaID},
-		{ID: 3, Title: "Robotics intro", StartsAt: day.Add(33 * time.Hour), EndsAt: day.Add(36 * time.Hour), PlaceLimit: 8, OwnerID: stellaID},
+		{ID: 1, Title: "Chemistry basics", PlaceLimit: 10, OwnerID: stellaID},
+		{ID: 2, Title: "Circuits workshop", PlaceLimit: 2, OwnerID: stellaID},
+		{ID: 3, Title: "Robotics intro", PlaceLimit: 8, OwnerID: stellaID},
 	}
+	st.LabSessions = []servicetest.LabSession{fakeSession(1, 1, 9, 12), fakeSession(2, 2, 13, 17), fakeSession(3, 3, 33, 36)}
 	return newServer(t, st, st).URL, st
+}
+
+// fakeSession is a session of a lab from one hour of the fixed clock's day to another.
+func fakeSession(id, labID int64, from, to int) servicetest.LabSession {
+	day := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
+	return servicetest.LabSession{ID: id, LabID: labID, StartsAt: day.Add(time.Duration(from) * time.Hour), EndsAt: day.Add(time.Duration(to) * time.Hour)}
 }
 
 func TestAC3_StudentSignsInAndLandsOnTodaysLabs(t *testing.T) {
@@ -95,7 +103,7 @@ func TestAC17_WrongPasswordAndUnknownEmailShowTheSameText(t *testing.T) {
 
 func TestAC19_BookingWithoutSessionIs401(t *testing.T) {
 	base, _ := newFakeApp(t)
-	r := do(t, newClient(t), http.MethodPost, base+"/labs/1/book", url.Values{})
+	r := do(t, newClient(t), http.MethodPost, base+"/sessions/1/book", url.Values{})
 	if r.status != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", r.status)
 	}

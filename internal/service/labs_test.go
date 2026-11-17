@@ -14,47 +14,69 @@ import (
 
 func TestListTodayReturnsOnlyLabsOverlappingToday_AC3(t *testing.T) {
 	st := servicetest.NewStore()
-	day := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
-	st.Labs = []store.Lab{
-		{ID: 1, Title: "Today", StartsAt: day.Add(9 * time.Hour), EndsAt: day.Add(12 * time.Hour)},
-		{ID: 2, Title: "Since yesterday", StartsAt: day.Add(-2 * time.Hour), EndsAt: day.Add(time.Hour)},
-		{ID: 3, Title: "Tomorrow", StartsAt: day.Add(33 * time.Hour), EndsAt: day.Add(36 * time.Hour)},
-		{ID: 4, Title: "Yesterday", StartsAt: day.Add(-5 * time.Hour), EndsAt: day},
+	st.Labs = []store.Lab{{ID: 1, Title: "Optics"}, {ID: 2, Title: "Circuits"}}
+	st.LabSessions = []servicetest.LabSession{
+		sess(1, 1, 9, 12),   // today
+		sess(2, 2, -2, 1),   // since yesterday
+		sess(3, 1, 33, 36),  // tomorrow
+		sess(4, 2, -5, 0),   // ended at midnight
+		sess(5, 2, 13, 15),  // today, a second lab
+		sess(6, 1, 46, 48),  // later
+		sess(7, 2, -20, -8), // yesterday
 	}
-	l := service.NewLabs(st, clock, time.UTC)
-	labs, err := l.ListToday(context.Background(), service.Caller{ID: 7})
+	sessions, err := service.NewLabs(st, clock, time.UTC).ListToday(context.Background(), service.Caller{ID: 7})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(labs) != 2 || labs[0].ID != 1 || labs[1].ID != 2 {
-		t.Fatalf("labs = %+v, want ids 1 and 2", labs)
+	var ids []int64
+	for _, s := range sessions {
+		ids = append(ids, s.SessionID)
+	}
+	if len(ids) != 3 || ids[0] != 2 || ids[1] != 1 || ids[2] != 5 {
+		t.Fatalf("sessions = %v, want 2, 1, 5 in time order", ids)
+	}
+	if sessions[1].Title != "Optics" || sessions[1].LabID != 1 {
+		t.Errorf("session 1 = %+v, want lab 1, Optics", sessions[1])
 	}
 }
 
 func TestListTodayFreePlacesAreLimitMinusBookings_AC10(t *testing.T) {
 	st := servicetest.NewStore()
-	day := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
-	at := func(h int) time.Time { return day.Add(time.Duration(h) * time.Hour) }
 	st.Labs = []store.Lab{
-		{ID: 1, Title: "None booked", StartsAt: at(9), EndsAt: at(12), PlaceLimit: 5},
-		{ID: 2, Title: "Some booked", StartsAt: at(10), EndsAt: at(12), PlaceLimit: 5},
-		{ID: 3, Title: "Full", StartsAt: at(11), EndsAt: at(12), PlaceLimit: 2},
-		{ID: 4, Title: "Over-full", StartsAt: at(12), EndsAt: at(14), PlaceLimit: 1},
+		{ID: 1, Title: "None booked", PlaceLimit: 5}, {ID: 2, Title: "Some booked", PlaceLimit: 5},
+		{ID: 3, Title: "Full", PlaceLimit: 2}, {ID: 4, Title: "Over-full", PlaceLimit: 1},
 	}
+	st.LabSessions = []servicetest.LabSession{sess(1, 1, 9, 12), sess(2, 2, 10, 12), sess(3, 3, 11, 12), sess(4, 4, 12, 14)}
 	st.Bookers[2] = []store.Booker{{Name: "A"}, {Name: "B"}}
 	st.Bookers[3] = []store.Booker{{Name: "A"}, {Name: "B"}}
 	st.Bookers[4] = []store.Booker{{Name: "A"}, {Name: "B"}}
-	labs, err := service.NewLabs(st, clock, time.UTC).ListToday(context.Background(), service.Caller{ID: 7})
+	sessions, err := service.NewLabs(st, clock, time.UTC).ListToday(context.Background(), service.Caller{ID: 7})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := map[int64]int{1: 5, 2: 3, 3: 0, 4: 0}
-	if len(labs) != len(want) {
-		t.Fatalf("got %d labs, want %d", len(labs), len(want))
+	if len(sessions) != len(want) {
+		t.Fatalf("got %d sessions, want %d", len(sessions), len(want))
 	}
-	for _, l := range labs {
-		if l.FreePlaces != want[l.ID] {
-			t.Errorf("%s: free places = %d, want %d", l.Title, l.FreePlaces, want[l.ID])
+	for _, s := range sessions {
+		if s.FreePlaces != want[s.SessionID] {
+			t.Errorf("%s: free places = %d, want %d", s.Title, s.FreePlaces, want[s.SessionID])
+		}
+	}
+}
+
+func TestListTodayMarksStartedSessions_AC83(t *testing.T) {
+	st := servicetest.NewStore()
+	st.Labs = []store.Lab{{ID: 1, Title: "Optics", PlaceLimit: 5}}
+	st.LabSessions = []servicetest.LabSession{sess(1, 1, 8, 9), sess(2, 1, 10, 11), sess(3, 1, 12, 13)}
+	sessions, err := service.NewLabs(st, clock, time.UTC).ListToday(context.Background(), service.Caller{ID: 7})
+	if err != nil || len(sessions) != 3 {
+		t.Fatalf("sessions = %+v, err = %v", sessions, err)
+	}
+	// The clock says 10:00: ended, starting right now, and later.
+	for i, want := range []bool{true, true, false} {
+		if sessions[i].Started != want {
+			t.Errorf("session %d: Started = %v, want %v", sessions[i].SessionID, sessions[i].Started, want)
 		}
 	}
 }
@@ -75,38 +97,27 @@ func TestListTodayStoreError(t *testing.T) {
 	}
 }
 
-var (
-	staff   = service.Caller{ID: 2, Name: "Stella", Role: service.RoleStaff}
-	student = service.Caller{ID: 7, Name: "Sam", Role: service.RoleStudent}
-)
-
 func validLab() service.NewLab {
-	return service.NewLab{
-		Title: "  Optics  ", Description: " Lenses and lasers. ",
-		Starts: "2026-10-23T09:00", Ends: "2026-10-23T11:30", PlaceLimit: "12",
-	}
+	return service.NewLab{Title: "  Optics  ", Description: " Lenses and lasers. ", PlaceLimit: "12"}
 }
 
 func TestAddLabCreatesOneLab_AC12(t *testing.T) {
 	st := servicetest.NewStore()
 	st.Labs = []store.Lab{{ID: 4, Title: "Chemistry basics"}}
-	loc := time.FixedZone("UTC+2", 2*60*60)
-	l := service.NewLabs(st, clock, loc)
-
-	lab, err := l.Add(context.Background(), staff, validLab())
+	lab, err := service.NewLabs(st, clock, time.UTC).Add(context.Background(), staff, validLab())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := store.Lab{
-		ID: 5, Title: "Optics", Description: "Lenses and lasers.",
-		StartsAt: time.Date(2026, 10, 23, 9, 0, 0, 0, loc), EndsAt: time.Date(2026, 10, 23, 11, 30, 0, 0, loc), PlaceLimit: 12,
-		OwnerID: staff.ID, // AC-60
-	}
+	want := store.Lab{ID: 5, Title: "Optics", Description: "Lenses and lasers.", PlaceLimit: 12, OwnerID: staff.ID}
 	if lab != want {
 		t.Fatalf("lab = %+v, want %+v", lab, want)
 	}
 	if n := st.LabCount(); n != 2 {
 		t.Fatalf("labs = %d, want 2", n)
+	}
+	// A new lab has no sessions: its owner adds them (AC-67).
+	if n := st.SessionCount(5); n != 0 {
+		t.Fatalf("sessions = %d, want 0", n)
 	}
 }
 
@@ -134,29 +145,22 @@ func TestAddLabAcceptsAPlaceLimitOfOne_AC12(t *testing.T) {
 	}
 }
 
-func TestAddLabValidatesTitleAndPeriod(t *testing.T) {
-	cases := []struct {
-		name string
-		edit func(*service.NewLab)
-		want error
+func TestAddLabValidatesTitle(t *testing.T) {
+	for name, tc := range map[string]struct {
+		title string
+		want  error
 	}{
-		{"blank title", func(in *service.NewLab) { in.Title = "   " }, service.ErrTitleRequired},
-		{"long title", func(in *service.NewLab) { in.Title = strings.Repeat("é", 201) }, service.ErrTitleTooLong},
-		{"bad start", func(in *service.NewLab) { in.Starts = "tomorrow" }, service.ErrInvalidPeriod},
-		{"missing end", func(in *service.NewLab) { in.Ends = "" }, service.ErrInvalidPeriod},
-		{"end before start", func(in *service.NewLab) { in.Ends = "2026-10-23T08:00" }, service.ErrPeriodOrder},
-		{"end equals start", func(in *service.NewLab) { in.Ends = in.Starts }, service.ErrPeriodOrder},
-	}
-	for _, tc := range cases {
+		"blank title": {"   ", service.ErrTitleRequired},
+		"long title":  {strings.Repeat("é", 201), service.ErrTitleTooLong},
+	} {
 		st := servicetest.NewStore()
 		in := validLab()
-		tc.edit(&in)
-		_, err := service.NewLabs(st, clock, time.UTC).Add(context.Background(), staff, in)
-		if err != tc.want {
-			t.Errorf("%s: err = %v, want %v", tc.name, err, tc.want)
+		in.Title = tc.title
+		if _, err := service.NewLabs(st, clock, time.UTC).Add(context.Background(), staff, in); err != tc.want {
+			t.Errorf("%s: err = %v, want %v", name, err, tc.want)
 		}
 		if n := st.LabCount(); n != 0 {
-			t.Errorf("%s: %d labs created", tc.name, n)
+			t.Errorf("%s: %d labs created", name, n)
 		}
 	}
 	in := validLab()
@@ -215,55 +219,81 @@ func TestAddLabStoreError(t *testing.T) {
 	}
 }
 
-func TestLabBookingsListsExactlyTheBookers_AC14(t *testing.T) {
+// bookersStore has Stella's lab 1 with an upcoming session 1 (Ana, Ben), a later session 3 (Cleo),
+// and yesterday's session 4 (Dan); and lab 2 with session 2 (Eve).
+func bookersStore() *servicetest.Store {
 	st := servicetest.NewStore()
-	st.Labs = []store.Lab{{ID: 1, Title: "Optics", OwnerID: staff.ID}, {ID: 2, Title: "Circuits", OwnerID: staff.ID}}
+	st.Labs = []store.Lab{{ID: 1, Title: "Optics", PlaceLimit: 4, OwnerID: staff.ID}, {ID: 2, Title: "Circuits", PlaceLimit: 2, OwnerID: staff.ID}}
+	st.LabSessions = []servicetest.LabSession{sess(1, 1, 13, 15), sess(2, 2, 13, 15), sess(3, 1, 37, 39), sess(4, 1, -14, -12)}
 	st.Bookers[1] = []store.Booker{{Name: "Ana", Email: "ana@labwiz.test"}, {Name: "Ben", Email: "ben@labwiz.test"}}
-	st.Bookers[2] = []store.Booker{{Name: "Cleo", Email: "cleo@labwiz.test"}}
+	st.Bookers[2] = []store.Booker{{Name: "Eve"}}
+	st.Bookers[3] = []store.Booker{{Name: "Cleo"}}
+	st.Bookers[4] = []store.Booker{{Name: "Dan"}}
+	return st
+}
 
-	lab, bookers, err := service.NewLabs(st, clock, time.UTC).Bookings(context.Background(), staff, 1)
+func TestLabBookingsListsExactlyTheBookers_AC14(t *testing.T) {
+	page, err := service.NewLabs(bookersStore(), clock, time.UTC).Bookings(context.Background(), staff, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lab.Title != "Optics" || len(bookers) != 2 || bookers[0].Name != "Ana" || bookers[1].Name != "Ben" {
-		t.Fatalf("lab = %+v, bookers = %+v", lab, bookers)
+	if page.Lab.Title != "Optics" || len(page.Upcoming) != 2 || len(page.Past) != 1 {
+		t.Fatalf("page = %+v, want Optics with 2 upcoming sessions and 1 past", page)
+	}
+	first, later, past := page.Upcoming[0], page.Upcoming[1], page.Past[0]
+	if first.SessionID != 1 || len(first.Bookers) != 2 || first.Bookers[0].Name != "Ana" || first.Bookers[1].Name != "Ben" {
+		t.Errorf("first session = %+v, want session 1 with Ana and Ben", first)
+	}
+	if later.SessionID != 3 || len(later.Bookers) != 1 || later.Bookers[0].Name != "Cleo" {
+		t.Errorf("later session = %+v, want session 3 with Cleo", later)
+	}
+	if past.SessionID != 4 || len(past.Bookers) != 1 || past.Bookers[0].Name != "Dan" || first.FreePlaces != 2 {
+		t.Errorf("past = %+v, first free places = %d", past, first.FreePlaces)
+	}
+}
+
+func TestLabBookingsListsPastSessionsMostRecentFirst_AC14(t *testing.T) {
+	st := bookersStore()
+	st.LabSessions = append(st.LabSessions, sess(5, 1, -40, -38))
+	page, err := service.NewLabs(st, clock, time.UTC).Bookings(context.Background(), staff, 1)
+	if err != nil || len(page.Past) != 2 || page.Past[0].SessionID != 4 || page.Past[1].SessionID != 5 {
+		t.Fatalf("past = %+v, err = %v; want session 4 then 5", page.Past, err)
 	}
 }
 
 func TestLabBookingsStudentIsForbidden_AC45(t *testing.T) {
-	st := servicetest.NewStore()
-	st.Labs = []store.Lab{{ID: 1, Title: "Optics"}}
-	st.Bookers[1] = []store.Booker{{Name: "Ana"}}
-	l := service.NewLabs(st, clock, time.UTC)
+	l := service.NewLabs(bookersStore(), clock, time.UTC)
 	for _, id := range []int64{1, 99} {
-		_, bookers, err := l.Bookings(context.Background(), student, id)
-		if err != service.ErrForbidden || bookers != nil {
-			t.Errorf("lab %d: err = %v, bookers = %+v", id, err, bookers)
+		page, err := l.Bookings(context.Background(), student, id)
+		if err != service.ErrForbidden || page.Upcoming != nil {
+			t.Errorf("lab %d: err = %v, page = %+v", id, err, page)
 		}
 	}
-	if _, _, err := l.Bookings(context.Background(), service.Caller{}, 1); err != service.ErrUnauthenticated {
+	if _, err := l.Bookings(context.Background(), service.Caller{}, 1); err != service.ErrUnauthenticated {
 		t.Errorf("nobody: err = %v", err)
 	}
 }
 
 func TestLabBookingsUnknownLabIsNotFound(t *testing.T) {
-	_, _, err := service.NewLabs(servicetest.NewStore(), clock, time.UTC).Bookings(context.Background(), staff, 99)
+	_, err := service.NewLabs(servicetest.NewStore(), clock, time.UTC).Bookings(context.Background(), staff, 99)
 	if err != service.ErrLabNotFound {
 		t.Fatalf("err = %v", err)
 	}
 }
 
 func TestLabBookingsStoreErrors(t *testing.T) {
-	st := servicetest.NewStore()
-	st.Labs = []store.Lab{{ID: 1, Title: "Optics", OwnerID: staff.ID}}
+	st := bookersStore()
 	l := service.NewLabs(st, clock, time.UTC)
-
 	st.ErrLabByID = errDB
-	if _, _, err := l.Bookings(context.Background(), staff, 1); !errors.Is(err, errDB) {
+	if _, err := l.Bookings(context.Background(), staff, 1); !errors.Is(err, errDB) {
 		t.Errorf("lab lookup: err = %v", err)
 	}
-	st.ErrLabByID, st.ErrLabBookers = nil, errDB
-	if _, _, err := l.Bookings(context.Background(), staff, 1); !errors.Is(err, errDB) {
+	st.ErrLabByID, st.ErrSessionsOfLab = nil, errDB
+	if _, err := l.Bookings(context.Background(), staff, 1); !errors.Is(err, errDB) {
+		t.Errorf("sessions: err = %v", err)
+	}
+	st.ErrSessionsOfLab, st.ErrSessionBookers = nil, errDB
+	if _, err := l.Bookings(context.Background(), staff, 1); !errors.Is(err, errDB) {
 		t.Errorf("bookers: err = %v", err)
 	}
 }

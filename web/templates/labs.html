@@ -1,11 +1,11 @@
 {{define "content"}}
 <h1>Labs available today</h1>
 <p id="flash" class="message" role="status" hidden></p>
-{{if .Labs}}
+{{if .Sessions}}
 <ul class="lab-list">
-  {{range .Labs}}
-  <li class="lab-list__item" data-lab="{{.ID}}">
-    <h2 class="lab-card__title" id="lab-{{.ID}}-title"><a href="{{if eq .OwnerID $.User.ID}}/staff/labs/{{.ID}}{{else}}/labs/{{.ID}}{{end}}">{{.Title}}</a></h2>
+  {{range .Sessions}}
+  <li class="lab-list__item" data-session="{{.SessionID}}">
+    <h2 class="lab-card__title" id="session-{{.SessionID}}-title"><a href="{{if eq .OwnerID $.User.ID}}/staff/labs/{{.LabID}}{{else}}/labs/{{.LabID}}{{end}}">{{.Title}}</a></h2>
     {{with .Description}}<p class="lab-card__description">{{.}}</p>{{end}}
     <p class="lab-meta"><span class="lab-card__period">{{period .StartsAt .EndsAt}}</span> · {{template "freePlaces" .}} · {{template "owner" .}}</p>
     {{if not $.User.IsStaff}}{{template "bookForm" .}}{{end}}
