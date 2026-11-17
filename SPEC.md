@@ -72,15 +72,17 @@ Layers: handler → service → store → database. HTTP and MCP both go through
 A staff member adds a lab (`POST /staff/labs/new`):
 1. **Entry**: `cmd/server/main.go` loads config, opens the pool and wires store, services and router together.
 2. **Routing and session**: `internal/handler/router.go` matches the route inside the `RequirePage` group. `internal/auth/session.go` reads the cookie, gets the caller from `service.Auth.CurrentUser` (`internal/service/auth.go`), and puts it in the request context. With no valid session, the visitor is redirected to `/login`.
-3. **Handler**: `addLab` in `internal/handler/staff.go` caps the body size, parses the form into `service.NewLab` and calls `Labs.Add`.
-4. **Service**: `Labs.Add` in `internal/service/labs.go` checks the role (`RequireStaff`, AC-15), validates the title, time period and place limit (AC-13), and maps `store.ErrDuplicate` to `ErrDuplicateTitle` (AC-2). The typed errors are in `internal/service/errors.go`.
-5. **Store**: `CreateLab` in `internal/store/labs.go` runs the only SQL, an `INSERT … RETURNING id`, and turns SQLSTATE `23505` into `ErrDuplicate`.
-6. **Database**: the `labs` table and its unique title come from `migrations/000001_init.up.sql`. The unique constraint, not a prior lookup, decides a duplicate title, so two staff adding the same title at once cannot both succeed.
+3. **Handler**: `addLab` in `internal/handler/staff.go` caps the body size, parses the form into `service.NewLab` and calls `Labs.Add`. It does not check the role: no handler does.
+4. **Service**: `Labs.Add` in `internal/service/labs.go` checks the role (`RequireStaff`, AC-15), validates the title, time period and place limit (AC-13), makes the caller the owner (AC-60), and maps `store.ErrDuplicate` to `ErrDuplicateTitle` (AC-2). The role and ownership checks (`RequireStaff`, `RequireOwner`) are in `internal/service/auth.go`, the typed errors in `internal/service/errors.go`.
+5. **Store**: `CreateLab` in `internal/store/labs.go` runs the only SQL, an `INSERT … RETURNING id` that includes `owner_id`, and turns SQLSTATE `23505` into `ErrDuplicate`.
+6. **Database**: the `labs` table and its unique title come from `migrations/000001_init.up.sql`, and its required `owner_id`, a foreign key to `users`, from `migrations/000003_lab_owners.up.sql`. The unique constraint, not a prior lookup, decides a duplicate title, so two staff adding the same title at once cannot both succeed.
 7. **Back out**: on success the handler redirects to `/staff/labs/{id}?created=1`. A validation or conflict error re-renders `web/templates/lab_new.html` with the message and the typed values (400/409). Any other error goes through `fail` → `statusFor` in `internal/handler/render.go`, which shows one readable sentence (AC-43).
 
-**Where the code does not match the layering:** `newLabForm` and `addLab` in `internal/handler/staff.go` call `service.RequireStaff` themselves before calling the service. AGENTS.md says handlers never check roles. The rule itself still lives in the service, and `Labs.Add` checks it again, so the result is right. But the handler now decides when authorization runs: it does so to answer 403 before reading the form. `newLabForm` has no service call, so the role check is its only guard. An MCP `add_lab` tool will not get this early check, so the two paths differ in when they refuse, though not in what they refuse. The fix is a service method such as `Labs.NewLabForm(caller)` that the GET handler calls, and dropping the handler's own check from `addLab`. Slice 3a makes this fix, because ownership checks must not follow the same pattern.
+**Where the code does not match the layering:** `seed.Demo` in `internal/seed/demo.go` books the demo students straight through `store.BookLab`, with a check of its own that only skips duplicates and full labs. It never goes through `Labs.Book`, so the service's booking rules do not run: no student role check, and no "not open today" rule. That is why the demo lab "Water quality testing", which ended yesterday, has a booking that no request could make. The store still enforces what the database enforces (unique booking, the lab lock), so the data is consistent, but it is not data the app's rules would produce. It is acceptable for a development seed, and tests use `seed.Run`, which books nothing. The fix, if the demo data should obey the rules, is to book through `Labs.Book` with each demo student as the caller, and to give past labs no bookings.
 
-This section describes the code as it is. Slices 3a and 3b change the add-lab form (no time period, and an owner) and move bookings onto sessions; the trace is updated when they are built.
+Slice 3a removed the earlier mismatch: `internal/handler/staff.go` used to call `service.RequireStaff` itself. The GET handler now asks `Labs.NewLabForm(caller)`, and `addLab` leaves the role check to `Labs.Add`, so HTTP and MCP refuse a student at the same point.
+
+This section describes the code as it is. Slice 3b changes the add-lab form (no time period) and moves bookings onto sessions; the trace is updated then.
 
 ## Decisions
 How the criteria are written:
@@ -244,7 +246,7 @@ The pages:
 | AC-13 | `TestAddLabRejectsBadPlaceLimit_AC13`, `TestAC13_BadPlaceLimitShowsMessageAndCreatesNothing`, `TestAC13_DB_BadPlaceLimitCreatesNoRow` |
 | AC-2 | `TestAddLabDuplicateTitleIsConflict_AC2`, `TestAC2_DuplicateTitleIs409`, `TestAC2_DB_DuplicateTitleIs409AndNoRow` |
 | AC-14 | `TestLabBookingsListsExactlyTheBookers_AC14`, `TestAC14_StaffSeesBookersTable`, `TestAC14_DB_StaffSeesExactlyTheStudentsWhoBooked` |
-| AC-15 | `TestAddLabStudentIsForbidden_AC15`, `TestRequireStaff_AC15`, `TestAC15_StudentGetAndPostNewLabAre403`, `TestAC15_DB_StudentGetsAndPosts403AndNoRow` |
+| AC-15 | `TestAddLabStudentIsForbidden_AC15`, `TestRequireStaff_AC15`, `TestNewLabFormIsForStaffOnly_AC15`, `TestAC15_StudentGetAndPostNewLabAre403`, `TestAC15_StudentPostOfNewLabIs403WithoutHandlerRoleCheck`, `TestAC15_DB_StudentGetsAndPosts403AndNoRow` |
 | AC-45 | `TestLabBookingsStudentIsForbidden_AC45`, `TestAC45_StudentGetsStaffLabPage403`, `TestAC45_DB_StudentGetsStaffLabPage403` |
 | AC-4 | `TestBookTakesOnePlace_AC4`, `TestAC4_ScriptBookingConfirmsAndReturnsTheNewCount`, `TestAC4_FormBookingRedirectsToTheLabWithConfirmation`, `TestAC4_BookingScriptIsServedAndLoaded`, `TestAC4_DB_BookingAddsExactlyOneRowAndLowersTheCount` |
 | AC-5 | `TestBookTwiceIsAlreadyBooked_AC5`, `TestAC5_SecondBookingIs409`, `TestAC5_DB_SecondBookingIs409AndLeavesOneRow`, `TestBookLabReportsAMissingLabAndADuplicate_AC47_AC5` |
@@ -255,6 +257,12 @@ The pages:
 | AC-47 | `TestBookUnknownLabIsNotFound_AC47`, `TestGetLabShowsFreePlaces_AC47`, `TestAC47_UnknownLabIs404`, `TestAC47_DB_UnknownLabIs404AndCreatesNoRow`, `TestBookLabReportsAMissingLabAndADuplicate_AC47_AC5` |
 | AC-48 (retired) | `TestBookLabNotAvailableTodayIsRefused_AC48`, `TestAC48_LabNotAvailableTodayIsRefused`, `TestAC48_DB_LabNotAvailableTodayIsRefusedAndCreatesNoRow` |
 | AC-19 | `TestBookWithoutCallerIsUnauthenticated_AC19`, `TestAC19_BookingWithoutSessionIs401`, `TestAC19_ScriptBookingWithoutSessionIs401`, `TestAC19_DB_BookingWithoutSessionIs401AndBookingsUnchanged` |
+| AC-60 | `TestAddLabStoresTheCallerAsOwner_AC60`, `TestAC60_DB_AddedLabIsOwnedByTheStaffMember`, `TestAC60_DB_MigrationGivesExistingLabsTheFirstStaffAccount`, `TestAC60_DB_LabsMustHaveAnExistingOwner`, `TestDemoLabsAreOwnedByStaffFromThreeAccounts_AC60` |
+| AC-61 | `TestLabsShowTheirOwnersName_AC61`, `TestAC61_LabsShowTheirOwner` |
+| AC-62 | `TestMyLabsListsOnlyTheCallersLabs_AC62`, `TestAC62_MyLabsListsExactlyTheCallersLabs`, `TestAC62_CardTitlesLinkStaffToTheirOwnLabsOnly`, `TestAC62_HeaderLinksStaffToMyLabs`, `TestAC62_DB_EachStaffMemberSeesOnlyTheirOwnLabs` |
+| AC-63 | `TestMyLabsIsEmptyForStaffWhoOwnNothing_AC63`, `TestAC63_MyLabsWithoutLabsShowsTheEmptyState` |
+| AC-64 | `TestRequireOwner_AC64`, `TestLabBookingsAreForTheOwnerOnly_AC64`, `TestAC64_AnotherStaffMembersLabIs403`, `TestAC64_DB_AnotherStaffMembersLabIs403` |
+| AC-65 | `TestMyLabsIsForStaffOnly_AC65`, `TestAC65_StudentGetsMyLabs403` |
 
 ## Spec vs result
 <!-- After the agent builds the slice: which criteria passed, which it missed or reinterpreted, and what you changed in this spec because of it. -->
@@ -327,3 +335,27 @@ New features were discussed and added as Slices 3a–3e, before Slices 4–7 bui
 - CSRF tokens on every form that changes something, now that staff can delete and cancel (AC-85–87). This reverses the Slice 3 decision to rely on `SameSite=Lax` alone.
 - Gaps closed in Slice 4: the "Booked" state after a reload, cancelled sessions on `/bookings`, and no cancelling after a session starts (AC-88–90). MCP: owner-only booking lists (AC-91), and two new tools, `schedule_session` and `cancel_session`, so staff can manage sessions through MCP as on the web pages (AC-92–94; AC-24 and AC-39 now count nine tools). Lab editing stays a non-goal.
 - The decisions and the retired criteria moved out of the acceptance-criteria section, which the spec self-check read as criteria without an id.
+
+### Slice 3a (checked 2026-11-17)
+Checked with `go test ./...` against the in-memory store and a real `labwiz_test` database (no test skipped), by migrating the development database, which held Slice 3 data, and by reading the code. Service coverage stays at 100%.
+
+| Criterion | Result | Notes |
+| --- | --- | --- |
+| AC-60 | Passed | `Labs.Add` makes the caller the owner. Migration `000003_lab_owners` gives labs from before owners existed to the lowest-id staff account and stops with a readable error if there is none. A store test runs it from schema version 2 over two labs and a booking; on the development database, 15 labs went to Stella and all 13 bookings were kept. The database refuses a lab with no owner or an unknown one. |
+| AC-61 | Passed | "Run by …" on the lab cards and the lab page, from one shared template part. |
+| AC-62 | Passed | `/staff/labs` lists the caller's labs on every day, not only today, with "N of M places booked". Added: a "My labs" header button for staff, and card titles that link staff to the staff page of their own labs only. |
+| AC-63 | Passed | "You have no labs yet." with a link to `/staff/labs/new`. |
+| AC-64 | Passed | `RequireOwner` in the service, after the lookup; a student is still refused before it (AC-45). On another owner's public lab page, staff see neither the booking-list link nor a Book button. |
+| AC-65 | Passed | `MyLabs` calls `RequireStaff`. |
+| AC-14 | Passed, reworded | The owner sees the booking list; other staff get AC-64's 403. Test fixtures now give their labs an owner. |
+| AC-15 | Passed, re-checked | The handler no longer checks the role; `Labs.NewLabForm` and `Labs.Add` refuse a student with 403 and no row. |
+| AC-29, AC-41 | Untested | `/staff/labs` at 375 px and by keyboard still need a check by hand. The page has no inputs. |
+| AC-30, AC-42 | Passed | `/staff/labs` has no forbidden rules and its own title, "My labs · Labwiz". |
+
+Decisions taken while building it:
+- `RequireOwner` is exported next to `RequireStaff`, so Slices 3b and 3c and the MCP tools reuse one ownership rule.
+- A lab's owner must be staff. The database cannot check another table's column, so the service does: only staff can add labs.
+- The demo seed gives its labs to Dana and Omar, so the demo has three owners and "My labs" differs per account.
+
+What changed in this spec because of it:
+- Architecture: the trace names the owner and `RequireOwner`. The fixed handler-side role check is replaced, as the one place where the code does not match the layering, by `seed.Demo` booking through the store and skipping the service's rules.
