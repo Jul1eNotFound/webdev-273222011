@@ -22,7 +22,7 @@ type pageData struct {
 	Error   string
 	Success string
 	Email   string
-	Labs    []store.Lab
+	Labs    []service.LabCard
 	Form    service.NewLab
 	Lab     *store.Lab
 	Bookers []store.Booker

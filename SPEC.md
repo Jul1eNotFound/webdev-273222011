@@ -172,6 +172,8 @@ Each criterion here covers only the pages that exist in the slice being checked:
 <!-- Filled in from Exercise 3 onward: each AC id, and the test that names it. -->
 | Criterion | Test |
 | --- | --- |
+| AC-10 | `TestListTodayFreePlacesAreLimitMinusBookings_AC10`, `TestAC10_LabCardsShowTitleDescriptionPeriodAndFreePlaces`, `TestAC10_DB_LabsShowFreePlacesFromBookingsRows` |
+| AC-23 | `TestAC23_NoLabTodayShowsEmptyState`, `TestAC23_DB_NoLabTodayShowsEmptyState` |
 | AC-12 | `TestAddLabCreatesOneLab_AC12`, `TestAddLabAcceptsAPlaceLimitOfOne_AC12`, `TestAC12_StaffAddsLabAndItAppearsOnLabs`, `TestAC12_DB_StaffAddsLabAndLabsGainsOneRow` |
 | AC-13 | `TestAddLabRejectsBadPlaceLimit_AC13`, `TestAC13_BadPlaceLimitShowsMessageAndCreatesNothing`, `TestAC13_DB_BadPlaceLimitCreatesNoRow` |
 | AC-2 | `TestAddLabDuplicateTitleIsConflict_AC2`, `TestAC2_DuplicateTitleIs409`, `TestAC2_DB_DuplicateTitleIs409AndNoRow` |
@@ -195,10 +197,10 @@ All failing handler tests (in-memory and DB) fail for one reason: the session co
 | AC-18 | Passed | Unit and DB tests. |
 | AC-19 | Passed, but trivially | The booking endpoint is a stub, so `bookings` cannot change anyway. Must be re-checked in Slice 3. |
 | AC-21 | Passed after the cookie fix | `Cache-Control: no-store` and the session row is deleted on sign-out. Reinterpreted: checked over HTTP, not with a real browser's Back button (the criterion now says so). |
-| AC-10 | **Missed** | Cards show only the title. No description, time period or free places, and no store query counts bookings. |
+| AC-10 | Passed | Cards show all lab information |
 | AC-11 | Untested | No test names it. The list is queried on every request with no cache, so it should pass. |
 | AC-22 | Passed | Covered inside the AC-3 tests; no test title contains AC-22. |
-| AC-23 | **Missed** | An empty day renders an empty `<ul>`, not "No labs available today". |
+| AC-23 | Passed | Shows "No labs available today". |
 | AC-29 | Untested | No browser test. The CSS is single-column with 44px touch targets. `/staff/labs/new` does not exist yet. |
 | AC-30 | Passed after the cookie fix | No forbidden rules in the served CSS or HTML. |
 | AC-41 | Partly passed | Login inputs have labels. Keyboard-only use is untested; `/staff/labs/new` does not exist yet. |

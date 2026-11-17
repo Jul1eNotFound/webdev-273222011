@@ -47,8 +47,15 @@ func NewLabs(s LabStore, now Clock, loc *time.Location) *Labs {
 // Location is the timezone lab times are typed and shown in.
 func (l *Labs) Location() *time.Location { return l.loc }
 
-// ListToday returns the labs whose time period includes part of today. Any signed-in user may call it.
-func (l *Labs) ListToday(ctx context.Context, caller Caller) ([]store.Lab, error) {
+// LabCard is a lab as listed on /labs, with the places still free.
+type LabCard struct {
+	store.Lab
+	FreePlaces int
+}
+
+// ListToday returns the labs whose time period includes part of today, each with its free places
+// (AC-10). Any signed-in user may call it.
+func (l *Labs) ListToday(ctx context.Context, caller Caller) ([]LabCard, error) {
 	if caller.ID == 0 {
 		return nil, ErrUnauthenticated
 	}
@@ -58,7 +65,16 @@ func (l *Labs) ListToday(ctx context.Context, caller Caller) ([]store.Lab, error
 	if err != nil {
 		return nil, fmt.Errorf("list labs: %w", err)
 	}
-	return labs, nil
+	cards := make([]LabCard, len(labs))
+	for i, lab := range labs {
+		cards[i] = LabCard{Lab: lab, FreePlaces: freePlaces(lab)}
+	}
+	return cards, nil
+}
+
+// freePlaces is the place limit minus the lab's bookings, never below zero.
+func freePlaces(lab store.Lab) int {
+	return max(lab.PlaceLimit-lab.Booked, 0)
 }
 
 // Add creates a lab. Staff only (AC-15); the place limit must be 1 or more (AC-13) and the title unused (AC-2).

@@ -1,6 +1,16 @@
 {{define "content"}}
 <h1>Labs available today</h1>
+{{if .Labs}}
 <ul class="lab-list">
-  {{range .Labs}}<li class="lab-list__item">{{if $.User.IsStaff}}<a href="/staff/labs/{{.ID}}">{{.Title}}</a>{{else}}{{.Title}}{{end}}</li>{{end}}
+  {{range .Labs}}
+  <li class="lab-list__item">
+    <h2 class="lab-card__title">{{if $.User.IsStaff}}<a href="/staff/labs/{{.ID}}">{{.Title}}</a>{{else}}{{.Title}}{{end}}</h2>
+    {{with .Description}}<p class="lab-card__description">{{.}}</p>{{end}}
+    <p class="lab-meta"><span class="lab-card__period">{{period .StartsAt .EndsAt}}</span> · <span class="lab-card__free">{{.FreePlaces}} of {{.PlaceLimit}} places free</span></p>
+  </li>
+  {{end}}
 </ul>
+{{else}}
+<p class="empty">No labs available today</p>
+{{end}}
 {{end}}

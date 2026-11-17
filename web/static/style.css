@@ -207,3 +207,19 @@ a {
   border-radius: var(--radius);
   padding: var(--space-4);
 }
+
+.lab-card__title {
+  font-size: var(--font-size-lg);
+  margin: 0 0 var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.lab-card__description {
+  margin: 0 0 var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.lab-list__item .lab-meta {
+  margin: 0;
+  font-size: var(--font-size-sm);
+}

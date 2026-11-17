@@ -31,6 +31,34 @@ func TestListTodayReturnsOnlyLabsOverlappingToday_AC3(t *testing.T) {
 	}
 }
 
+func TestListTodayFreePlacesAreLimitMinusBookings_AC10(t *testing.T) {
+	st := servicetest.NewStore()
+	day := time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)
+	at := func(h int) time.Time { return day.Add(time.Duration(h) * time.Hour) }
+	st.Labs = []store.Lab{
+		{ID: 1, Title: "None booked", StartsAt: at(9), EndsAt: at(12), PlaceLimit: 5},
+		{ID: 2, Title: "Some booked", StartsAt: at(10), EndsAt: at(12), PlaceLimit: 5},
+		{ID: 3, Title: "Full", StartsAt: at(11), EndsAt: at(12), PlaceLimit: 2},
+		{ID: 4, Title: "Over-full", StartsAt: at(12), EndsAt: at(14), PlaceLimit: 1},
+	}
+	st.Bookers[2] = []store.Booker{{Name: "A"}, {Name: "B"}}
+	st.Bookers[3] = []store.Booker{{Name: "A"}, {Name: "B"}}
+	st.Bookers[4] = []store.Booker{{Name: "A"}, {Name: "B"}}
+	labs, err := service.NewLabs(st, clock, time.UTC).ListToday(context.Background(), service.Caller{ID: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64]int{1: 5, 2: 3, 3: 0, 4: 0}
+	if len(labs) != len(want) {
+		t.Fatalf("got %d labs, want %d", len(labs), len(want))
+	}
+	for _, l := range labs {
+		if l.FreePlaces != want[l.ID] {
+			t.Errorf("%s: free places = %d, want %d", l.Title, l.FreePlaces, want[l.ID])
+		}
+	}
+}
+
 func TestListTodayNeedsASignedInCaller_AC9(t *testing.T) {
 	l := service.NewLabs(servicetest.NewStore(), clock, time.UTC)
 	if _, err := l.ListToday(context.Background(), service.Caller{}); err != service.ErrUnauthenticated {

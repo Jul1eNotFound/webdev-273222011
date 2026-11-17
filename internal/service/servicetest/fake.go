@@ -115,6 +115,7 @@ func (s *Store) LabsAvailableBetween(_ context.Context, from, to time.Time) ([]s
 	var out []store.Lab
 	for _, l := range s.Labs {
 		if l.StartsAt.Before(to) && l.EndsAt.After(from) {
+			l.Booked = len(s.Bookers[l.ID])
 			out = append(out, l)
 		}
 	}

@@ -212,3 +212,45 @@ func TestAC45_DB_StudentGetsStaffLabPage403(t *testing.T) {
 		t.Error("a student is shown the booking list")
 	}
 }
+
+func TestAC10_DB_LabsShowFreePlacesFromBookingsRows(t *testing.T) {
+	base, st, pool := newDBAppWithPool(t)
+	ctx := context.Background()
+	if err := st.UpsertUser(ctx, store.User{Email: "ana@labwiz.test", Name: "Ana Example", PasswordHash: "unused", Role: "student"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, email := range []string{seed.StudentEmail, "ana@labwiz.test"} {
+		u, err := st.UserByEmail(ctx, email)
+		if err != nil {
+			t.Fatal(err)
+		}
+		storetest.InsertBooking(t, pool, u.ID, seededLabID(t, st, "Circuits workshop"))
+		if email == seed.StudentEmail {
+			storetest.InsertBooking(t, pool, u.ID, seededLabID(t, st, "Chemistry basics"))
+		}
+	}
+
+	c := signedIn(t, base, seed.StudentEmail, seedPasswords.Student)
+	r := do(t, c, http.MethodGet, base+"/labs", nil)
+	for _, want := range []string{
+		"Chemistry basics", "Titration and safe handling of reagents.", "09:00–12:00", "9 of 10 places free",
+		"Circuits workshop", "13:00–17:00", "0 of 2 places free",
+		"Open microscopy", "08:00–20:00", "5 of 5 places free",
+	} {
+		wantStatus(t, r, http.StatusOK, want)
+	}
+}
+
+func TestAC23_DB_NoLabTodayShowsEmptyState(t *testing.T) {
+	base, _, pool := newDBAppWithPool(t)
+	// Leave only the seeded lab that starts tomorrow.
+	if _, err := pool.Exec(context.Background(), `DELETE FROM labs WHERE title <> 'Robotics intro'`); err != nil {
+		t.Fatal(err)
+	}
+	c := signedIn(t, base, seed.StudentEmail, seedPasswords.Student)
+	r := do(t, c, http.MethodGet, base+"/labs", nil)
+	wantStatus(t, r, http.StatusOK, "No labs available today")
+	if strings.Contains(r.body, "Robotics intro") {
+		t.Error("/labs shows the lab that starts tomorrow")
+	}
+}

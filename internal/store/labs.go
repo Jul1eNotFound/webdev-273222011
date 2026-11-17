@@ -19,6 +19,8 @@ type Lab struct {
 	StartsAt    time.Time
 	EndsAt      time.Time
 	PlaceLimit  int
+	// Booked is the lab's number of bookings rows. Only LabsAvailableBetween fills it in.
+	Booked int
 }
 
 // Booker is a student who booked a lab.
@@ -70,19 +72,20 @@ func (s *Store) LabBookers(ctx context.Context, labID int64) ([]Booker, error) {
 	return pgx.CollectRows(rows, pgx.RowToStructByPos[Booker])
 }
 
-// LabsAvailableBetween returns labs whose time period overlaps [from, to).
+// LabsAvailableBetween returns labs whose time period overlaps [from, to), each with its number of bookings.
 func (s *Store) LabsAvailableBetween(ctx context.Context, from, to time.Time) ([]Lab, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, title, description, starts_at, ends_at, place_limit
-		FROM labs
-		WHERE starts_at < $2 AND ends_at > $1
-		ORDER BY starts_at, title`, from, to)
+		SELECT l.id, l.title, l.description, l.starts_at, l.ends_at, l.place_limit,
+		       (SELECT count(*) FROM bookings b WHERE b.lab_id = l.id)
+		FROM labs l
+		WHERE l.starts_at < $2 AND l.ends_at > $1
+		ORDER BY l.starts_at, l.title`, from, to)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Lab, error) {
 		var l Lab
-		err := row.Scan(&l.ID, &l.Title, &l.Description, &l.StartsAt, &l.EndsAt, &l.PlaceLimit)
+		err := row.Scan(&l.ID, &l.Title, &l.Description, &l.StartsAt, &l.EndsAt, &l.PlaceLimit, &l.Booked)
 		return l, err
 	})
 }
