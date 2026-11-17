@@ -152,6 +152,13 @@ a {
   cursor: pointer;
 }
 
+.button:disabled {
+  background: var(--color-muted);
+  border-color: var(--color-muted);
+  color: var(--color-primary-text);
+  cursor: not-allowed;
+}
+
 .button--secondary {
   background: var(--color-surface);
   color: var(--color-primary);
@@ -222,4 +229,8 @@ a {
 .lab-list__item .lab-meta {
   margin: 0;
   font-size: var(--font-size-sm);
+}
+
+.book-form {
+  margin: var(--space-3) 0 0;
 }

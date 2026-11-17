@@ -126,7 +126,7 @@ func TestAC30_NoAnimationThemeToggleOrLanguageSwitcher(t *testing.T) {
 	c := newClient(t)
 	signIn(t, c, base, studentEmail, studentPass)
 	forbidden := regexp.MustCompile(`(?i)transition|animation|@keyframes|prefers-color-scheme|data-theme|hreflang`)
-	for _, path := range []string{"/static/style.css", "/labs", "/labs/1", "/login"} {
+	for _, path := range []string{"/static/style.css", "/static/booking.js", "/labs", "/labs/1", "/login"} {
 		r := do(t, c, http.MethodGet, base+path, nil)
 		if r.status != http.StatusOK && path != "/login" {
 			t.Fatalf("GET %s = %d", path, r.status)

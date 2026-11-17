@@ -212,6 +212,25 @@ func TestLabPageForStaffLinksToTheBookingsInsteadOfBooking(t *testing.T) {
 	}
 }
 
+func TestAC4_BookingScriptIsServedAndLoaded(t *testing.T) {
+	base, _ := newFakeApp(t)
+	c := signedIn(t, base, studentEmail, studentPass)
+	js := do(t, c, http.MethodGet, base+"/static/booking.js", nil)
+	if js.status != http.StatusOK || !strings.Contains(js.header.Get("Content-Type"), "javascript") {
+		t.Fatalf("GET /static/booking.js = %d %q", js.status, js.header.Get("Content-Type"))
+	}
+	// The script reads the full sentence from the service; keep the two in step.
+	if !strings.Contains(js.body, "'"+msgFull+".'") {
+		t.Errorf("booking.js does not know the sentence %q", msgFull+".")
+	}
+	for _, path := range []string{"/labs", "/labs/1"} {
+		r := do(t, c, http.MethodGet, base+path, nil)
+		for _, want := range []string{`<script src="/static/booking.js" defer></script>`, `id="flash"`, `data-free-places`} {
+			wantStatus(t, r, http.StatusOK, want)
+		}
+	}
+}
+
 func TestBookingStoreErrorIsAReadable500(t *testing.T) {
 	base, st := newFakeApp(t)
 	c := signedIn(t, base, studentEmail, studentPass)
