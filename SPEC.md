@@ -37,7 +37,7 @@ lab booking
 - Provider: Sign in with Google, the authorization-code flow, on the server.
 - Linking: matched on Google's account id. An address Google has not marked as verified is
   never linked to an existing account.
-- Forms: every form that changes something carries a CSRF token tied to the sign-in session (from Slice 3e). The sign-in form is exempt, since there is no session yet.
+- Forms: every form that changes something carries a CSRF token tied to the sign-in session: the HMAC-SHA256 of the session's cookie token under `SESSION_SECRET`, which must be at least 32 characters or the server does not start. The sign-in form is exempt, since there is no session yet.
 
 ## MCP tools
 | Tool | What it does | Who may call it |
@@ -82,7 +82,7 @@ A staff member adds a lab (`POST /staff/labs/new`):
 
 Slice 3a removed the earlier mismatch: `internal/handler/staff.go` used to call `service.RequireStaff` itself. The GET handler now asks `Labs.NewLabForm(caller)`, and `addLab` leaves the role check to `Labs.Add`, so HTTP and MCP refuse a student at the same point.
 
-This section describes the code as it is after Slice 3c. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row. Cancelling a session (`Labs.CancelSession` → `CancelSession` in `internal/store/cancel_delete.go`) takes the same lock, so no booking gets in after a cancel. Deleting a lab is one `DELETE`: its sessions cascade, and the `ON DELETE RESTRICT` key on `bookings.session_id` from `000004_lab_sessions` refuses a lab that has any booking. The database decides, not a prior lookup, so a booking made while the delete runs is never lost.
+This section describes the code as it is after Slice 3c. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row. Cancelling a session (`Labs.CancelSession` → `CancelSession` in `internal/store/cancel_delete.go`) takes the same lock, so no booking gets in after a cancel. Deleting a lab is one `DELETE`: its sessions cascade, and the `ON DELETE RESTRICT` key on `bookings.session_id` from `000004_lab_sessions` refuses a lab that has any booking. The database decides, not a prior lookup, so a booking made while the delete runs is never lost. Every request that changes something passes the CSRF check in `require` in `internal/auth/session.go`, after the session and before any handler, so no route can forget it.
 
 ## Decisions
 How the criteria are written:
@@ -282,6 +282,9 @@ The pages:
 | AC-80 | `TestAC80_DB_TomorrowsListShowsTomorrowsSessionOnly`, `TestAC80_DayPageMeetsTheDefinitionOfDone_AC30_AC41`, `TestAC80_LabListShowsTheChosenDay`, `TestAC80_TodayKeepsItsHeadingWithOrWithoutADate`, `TestListDayKeepsADaylightSavingDayWhole_AC80`, `TestListDayShowsTheChosenDay_AC80`, `TestListDayWithoutADateIsToday_AC80` |
 | AC-81 | `TestAC81_InvalidDateIs400WithASentence`, `TestListDayRefusesAnInvalidDate_AC81` |
 | AC-82 | `TestAC82_AnEmptyDayThatIsNotTodaySaysSo`, `TestAC82_DB_AnEmptyDayFarAheadSaysSo` |
+| AC-85 | `TestAC85_ChangesWithoutTheRightTokenAre403AndChangeNothing`, `TestAC85_DB_ChangesWithoutTheTokenLeaveTheDatabaseAsItWas`, `TestAC85_ScriptBookingWithoutTheHeaderIs403AsJSON`, `TestCSRFValidAcceptsOnlyTheSessionsOwnToken_AC85_AC86` |
+| AC-86 | `TestAC86_AnotherUsersTokenIsRefused`, `TestAC86_DB_AnotherAccountsTokenIsRefused`, `TestCSRFTokenIsPerSession_AC86`, `TestCSRFValidAcceptsOnlyTheSessionsOwnToken_AC85_AC86` |
+| AC-87 | `TestAC87_BookingScriptSendsTheTokenInAHeader`, `TestAC87_EveryChangingFormCarriesTheSessionsToken` |
 
 ## Spec vs result
 <!-- After the agent builds the slice: which criteria passed, which it missed or reinterpreted, and what you changed in this spec because of it. -->
@@ -339,7 +342,7 @@ Checked with `go test ./...` against the in-memory store and a real `labwiz_test
 Decisions taken while building it:
 - One endpoint for both clients: a request with `Accept: application/json` gets JSON, a plain form post gets a redirect or the error page.
 - The booking rules (already booked, not open today, full) live in `Labs.Book` and are passed to `store.BookLab`, which runs them inside its transaction while the lab is locked. The rules stay in the service, and atomicity stays in the store.
-- No CSRF token: the session cookie is `SameSite=Lax`, so a cross-site POST carries no session.
+- No CSRF token: the session cookie is `SameSite=Lax`, so a cross-site POST carries no session. (Replaced in Slice 3e by CSRF tokens.)
 - `/bookings` and the Cancel button move to Slice 4, with cancelling. After a booking, the script turns the button into a disabled "Booked". A reload shows "Book" again until Slice 4 knows the caller's own bookings; pressing it then gives "You have already booked this lab".
 
 What changed in this spec because of it:
@@ -455,3 +458,30 @@ Decisions taken while building it:
 
 What changed in this spec because of it:
 - The `?date=` decision says any day may be shown, past ones too.
+
+### Slice 3e (checked 2026-11-17)
+Checked with `go test ./...` against the in-memory store and a real `labwiz_test` database (no test skipped), `go test -race` on the CSRF tests, by switching the token check off on purpose, by starting the server with a real and with a placeholder secret, and by reading the code.
+
+| Criterion | Result | Notes |
+| --- | --- | --- |
+| AC-85 | Passed | All six changing POSTs (book by form and by script, add lab, add session, cancel, delete, sign out) with no field, an empty token and a wrong one give 403 with the sentence; nothing changes in any table, and a refused sign-out leaves the user signed in. With the check switched off, all AC-85 and AC-86 tests failed. |
+| AC-86 | Passed | The token is per sign-in session, so another user's token never matches; tested over HTTP, against the database, and on the token itself. |
+| AC-87 | Passed | On eight pages, every POST form carries exactly the session's token, and a csrf-token meta tag feeds booking.js's X-CSRF-Token header. The sign-in page has no token. |
+| AC-19 | Passed, re-checked | A visitor who is not signed in still gets 401 before any token check. |
+| AC-29, AC-41 | Unchanged | The token is a hidden field; there is nothing to label or to see. |
+
+Decisions taken while building it:
+- The token is signed, not stored: `HMAC-SHA256(SESSION_SECRET, session cookie token)`. No schema change, and a token dies with its session.
+- The check lives in the session middleware, so it covers every changing route, and sign-out moved behind it.
+- A form too large to read is now refused in the middleware with one sentence, "The form could not be read. Please try again."; two tests' expected text changed to it.
+- `.env.example` keeps the short placeholder `change-me`, so copying it unchanged makes the server refuse to start instead of running with a public secret.
+- Tests read HTML: two button patterns now allow the hidden token field, and the "no unlabelled input" check ignores hidden inputs.
+
+What went wrong:
+- After `SESSION_SECRET` was set in `.env`, the server still refused to start: `load-env.ps1` keeps variables already set in the PowerShell session, so the old `change-me` stayed. The script now lists the variables it kept and takes `-Force` to reload them; AGENTS.md says so.
+- The real secret was then found pasted into `.env.example`, which is tracked, and a `git diff` printed it in the agent session. It was never committed. `.env.example` was restored to the placeholder and the secret in `.env` was rotated; the old value is useless.
+
+What changed in this spec because of it:
+- The Auth section says how the token is made and that the server needs a 32-character `SESSION_SECRET`.
+- The Slice 3 note that relied on `SameSite=Lax` alone is marked as replaced.
+- The Architecture section says where the token check sits.
