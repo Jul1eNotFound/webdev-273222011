@@ -104,7 +104,7 @@ The domain:
 The pages:
 - `/` redirects to `/labs`, so "home page" means `/labs`.
 - Accounts are seeded; there is no sign-up screen. Staff and students are told apart by a role on the `users` row.
-- `/labs` defaults to the sessions whose time period includes part of today. `?date=` (Slice 3d) shows another day, and a smart-search date filter may widen it to a range.
+- `/labs` defaults to the sessions whose time period includes part of today. `?date=YYYY-MM-DD` shows another day (any day, past ones too; their sessions show as "Closed"), and a smart-search date filter may widen it to a range.
 - "Today" is the calendar day in the server process's local timezone. A deployment sets that timezone explicitly.
 - A time period is shown as `HH:MM–HH:MM` when it starts and ends on the same day, and as `D Mon HH:MM – D Mon HH:MM` otherwise, both in that timezone.
 - Error pages (400, 401, 403, 404, 405, 409, 500) count as one page and share one title.
@@ -279,6 +279,9 @@ The pages:
 | AC-77 | `TestAC77_DB_DeleteAnUnbookedLabAndRefuseABookedOne`, `TestAC77_DB_DeleteLabRemovesItAndItsSessions`, `TestAC77_DB_DeleteLabWithAnyBookingIsRefused`, `TestAC77_DeletingABookedLabIs409`, `TestAC77_OwnerDeletesALabNobodyBooked`, `TestDeleteLabNobodyBooked_AC77`, `TestDeleteLabWithBookingsIsRefused_AC77`, `TestStaffPageSaysWhatMayBeCancelledOrDeleted_AC75_AC77` |
 | AC-78 | `TestAC78_DB_BookingAfterTheLabWasDeletedIsNotFound`, `TestAC78_DB_DeleteAndBookAtTheSameTimeNeverLoseABooking`, `TestAC78_DB_DeleteWhileABookingHoldsTheLockIsRefused` |
 | AC-79 | `TestAC79_DB_AnotherStaffMemberCannotCancelOrDelete`, `TestAC79_OnlyTheOwnerMayCancelOrDelete`, `TestCancelIsForTheLabsOwnerOnly_AC79`, `TestDeleteIsForTheLabsOwnerOnly_AC79` |
+| AC-80 | `TestAC80_DB_TomorrowsListShowsTomorrowsSessionOnly`, `TestAC80_DayPageMeetsTheDefinitionOfDone_AC30_AC41`, `TestAC80_LabListShowsTheChosenDay`, `TestAC80_TodayKeepsItsHeadingWithOrWithoutADate`, `TestListDayKeepsADaylightSavingDayWhole_AC80`, `TestListDayShowsTheChosenDay_AC80`, `TestListDayWithoutADateIsToday_AC80` |
+| AC-81 | `TestAC81_InvalidDateIs400WithASentence`, `TestListDayRefusesAnInvalidDate_AC81` |
+| AC-82 | `TestAC82_AnEmptyDayThatIsNotTodaySaysSo`, `TestAC82_DB_AnEmptyDayFarAheadSaysSo` |
 
 ## Spec vs result
 <!-- After the agent builds the slice: which criteria passed, which it missed or reinterpreted, and what you changed in this spec because of it. -->
@@ -433,3 +436,22 @@ What went wrong:
 
 What changed in this spec because of it:
 - The Architecture section says how cancelling and deleting keep bookings safe.
+
+### Slice 3d (checked 2026-11-17)
+Checked with `go test ./...` against the in-memory store and a real `labwiz_test` database (no test skipped), by breaking the empty state on purpose, by reading the code, and by hand in the browser.
+
+| Criterion | Result | Notes |
+| --- | --- | --- |
+| AC-80 | Passed | `/labs?date=` shows that day's sessions under "Labs on Friday 23 October 2026", with previous/next day links, a Today link off today, and a labelled date field in a plain GET form. Today, with or without a date, keeps "Labs available today". A daylight saving day (25 Oct 2026 in Kyiv, 25 hours) stays whole. |
+| AC-81 | Passed | Seven invalid forms in the service and five over HTTP give 400 with "Please choose a valid date."; no parsing error text reaches the page. |
+| AC-82 | Passed | Changing the text back to the today empty state made both AC-82 tests fail. |
+| AC-22, AC-23 | Passed, re-checked | `/labs` without a date still shows only today, with its own empty state. |
+| AC-29, AC-41 | Checked by hand | The navigation row and the date field work in the browser; the field has its label (tested). |
+| AC-30 | Passed | The new CSS rules have no transitions. |
+
+Decisions taken while building it:
+- An empty `?date=` is today: the handler cannot tell it from no date, and today is the sensible answer.
+- The heading always includes the year. Leaving it out for the current year would need the real clock in the renderer, which the tests' fixed clock would not match.
+
+What changed in this spec because of it:
+- The `?date=` decision says any day may be shown, past ones too.
