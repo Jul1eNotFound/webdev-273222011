@@ -27,6 +27,9 @@ var (
 	ErrForbidden          = &Error{KindForbidden, "You are not allowed to do this."}
 
 	ErrLabNotFound       = &Error{KindNotFound, "This lab does not exist."}
+	ErrLabFull           = &Error{KindConflict, "This lab is full."}
+	ErrAlreadyBooked     = &Error{KindConflict, "You have already booked this lab."}
+	ErrLabNotOpen        = &Error{KindConflict, "This lab is not open for booking today."}
 	ErrDuplicateTitle    = &Error{KindConflict, "A lab with this title already exists. Please choose a different title."}
 	ErrTitleRequired     = &Error{KindValidation, "Please enter a title."}
 	ErrTitleTooLong      = &Error{KindValidation, "The title must be 200 characters or fewer."}

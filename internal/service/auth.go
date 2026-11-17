@@ -42,6 +42,17 @@ func RequireStaff(c Caller) error {
 	return nil
 }
 
+// RequireStudent allows signed-in students only, so staff cannot book (AC-46).
+func RequireStudent(c Caller) error {
+	if c.ID == 0 {
+		return ErrUnauthenticated
+	}
+	if c.Role != RoleStudent {
+		return ErrForbidden
+	}
+	return nil
+}
+
 type AuthStore interface {
 	UserByEmail(ctx context.Context, email string) (store.User, error)
 	CreateSession(ctx context.Context, idHash []byte, userID int64, expiresAt time.Time) error

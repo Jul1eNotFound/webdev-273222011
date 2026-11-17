@@ -19,7 +19,7 @@ type Lab struct {
 	StartsAt    time.Time
 	EndsAt      time.Time
 	PlaceLimit  int
-	// Booked is the lab's number of bookings rows. Only LabsAvailableBetween fills it in.
+	// Booked is the lab's number of bookings rows, filled in by the queries that say so.
 	Booked int
 }
 
@@ -46,12 +46,14 @@ func (s *Store) CreateLab(ctx context.Context, l Lab) (Lab, error) {
 	return l, nil
 }
 
+// LabByID returns one lab with its number of bookings.
 func (s *Store) LabByID(ctx context.Context, id int64) (Lab, error) {
 	var l Lab
 	err := s.db.QueryRow(ctx, `
-		SELECT id, title, description, starts_at, ends_at, place_limit
-		FROM labs
-		WHERE id = $1`, id).Scan(&l.ID, &l.Title, &l.Description, &l.StartsAt, &l.EndsAt, &l.PlaceLimit)
+		SELECT l.id, l.title, l.description, l.starts_at, l.ends_at, l.place_limit,
+		       (SELECT count(*) FROM bookings b WHERE b.lab_id = l.id)
+		FROM labs l
+		WHERE l.id = $1`, id).Scan(&l.ID, &l.Title, &l.Description, &l.StartsAt, &l.EndsAt, &l.PlaceLimit, &l.Booked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Lab{}, ErrNotFound
 	}

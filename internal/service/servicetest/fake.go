@@ -3,6 +3,7 @@ package servicetest
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -24,11 +25,17 @@ type Store struct {
 	Bookers map[int64][]store.Booker
 
 	ErrUserByEmail, ErrCreateSession, ErrSessionUser, ErrDeleteSession, ErrLabs error
-	ErrCreateLab, ErrLabByID, ErrLabBookers                                     error
+	ErrCreateLab, ErrLabByID, ErrLabBookers, ErrBookLab                         error
+
+	// booked holds the (user id, lab id) pairs booked through BookLab, like the unique constraint on bookings.
+	booked map[[2]int64]bool
 }
 
 func NewStore() *Store {
-	return &Store{users: map[string]store.User{}, sessions: map[string]session{}, Bookers: map[int64][]store.Booker{}}
+	return &Store{
+		users: map[string]store.User{}, sessions: map[string]session{},
+		Bookers: map[int64][]store.Booker{}, booked: map[[2]int64]bool{},
+	}
 }
 
 // LabCount returns how many labs are stored, like counting rows in labs.
@@ -149,10 +156,43 @@ func (s *Store) LabByID(_ context.Context, id int64) (store.Lab, error) {
 	}
 	for _, l := range s.Labs {
 		if l.ID == id {
+			l.Booked = len(s.Bookers[id])
 			return l, nil
 		}
 	}
 	return store.Lab{}, store.ErrNotFound
+}
+
+// BookLab holds the mutex throughout, so it is as atomic as the real store's locked transaction.
+func (s *Store) BookLab(_ context.Context, userID, labID int64, check store.BookingCheck) (store.Lab, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrBookLab != nil {
+		return store.Lab{}, s.ErrBookLab
+	}
+	i := slices.IndexFunc(s.Labs, func(l store.Lab) bool { return l.ID == labID })
+	if i < 0 {
+		return store.Lab{}, store.ErrNotFound
+	}
+	lab := s.Labs[i]
+	lab.Booked = len(s.Bookers[labID])
+	key := [2]int64{userID, labID}
+	if err := check(lab, s.booked[key]); err != nil {
+		return store.Lab{}, err
+	}
+	if s.booked[key] {
+		return store.Lab{}, store.ErrDuplicate
+	}
+	s.booked[key] = true
+	var b store.Booker
+	for _, u := range s.users {
+		if u.ID == userID {
+			b = store.Booker{Name: u.Name, Email: u.Email}
+		}
+	}
+	s.Bookers[labID] = append(s.Bookers[labID], b)
+	lab.Booked++
+	return lab, nil
 }
 
 func (s *Store) LabBookers(_ context.Context, labID int64) ([]store.Booker, error) {
