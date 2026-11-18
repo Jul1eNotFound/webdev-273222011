@@ -82,7 +82,7 @@ A staff member adds a lab (`POST /staff/labs/new`):
 
 Slice 3a removed the earlier mismatch: `internal/handler/staff.go` used to call `service.RequireStaff` itself. The GET handler now asks `Labs.NewLabForm(caller)`, and `addLab` leaves the role check to `Labs.Add`, so HTTP and MCP refuse a student at the same point.
 
-This section describes the code as it is after Slice 3c. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row. Cancelling a session (`Labs.CancelSession` → `CancelSession` in `internal/store/cancel_delete.go`) takes the same lock, so no booking gets in after a cancel. Deleting a lab is one `DELETE`: its sessions cascade, and the `ON DELETE RESTRICT` key on `bookings.session_id` from `000004_lab_sessions` refuses a lab that has any booking. The database decides, not a prior lookup, so a booking made while the delete runs is never lost. Every request that changes something passes the CSRF check in `require` in `internal/auth/session.go`, after the session and before any handler, so no route can forget it.
+This section describes the code as it is after Slice 4. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row. Cancelling a session (`Labs.CancelSession` → `CancelSession` in `internal/store/cancel_delete.go`) takes the same lock, so no booking gets in after a cancel. A student cancelling their own booking (`POST /sessions/{id}/cancel-booking` → `Labs.CancelBooking` → `CancelBooking` in `internal/store/my_bookings.go`) takes it too and deletes only the caller’s row, so a booking that waited for it gets the freed place. Deleting a lab is one `DELETE`: its sessions cascade, and the `ON DELETE RESTRICT` key on `bookings.session_id` from `000004_lab_sessions` refuses a lab that has any booking. The database decides, not a prior lookup, so a booking made while the delete runs is never lost. Every request that changes something passes the CSRF check in `require` in `internal/auth/session.go`, after the session and before any handler, so no route can forget it.
 
 ## Decisions
 How the criteria are written:
@@ -284,7 +284,13 @@ The pages:
 | AC-82 | `TestAC82_AnEmptyDayThatIsNotTodaySaysSo`, `TestAC82_DB_AnEmptyDayFarAheadSaysSo` |
 | AC-85 | `TestAC85_ChangesWithoutTheRightTokenAre403AndChangeNothing`, `TestAC85_DB_ChangesWithoutTheTokenLeaveTheDatabaseAsItWas`, `TestAC85_ScriptBookingWithoutTheHeaderIs403AsJSON`, `TestCSRFValidAcceptsOnlyTheSessionsOwnToken_AC85_AC86` |
 | AC-86 | `TestAC86_AnotherUsersTokenIsRefused`, `TestAC86_DB_AnotherAccountsTokenIsRefused`, `TestCSRFTokenIsPerSession_AC86`, `TestCSRFValidAcceptsOnlyTheSessionsOwnToken_AC85_AC86` |
-| AC-87 | `TestAC87_BookingScriptSendsTheTokenInAHeader`, `TestAC87_EveryChangingFormCarriesTheSessionsToken` |
+| AC-87 | `TestAC87_BookingScriptSendsTheTokenInAHeader`, `TestAC87_EveryChangingFormCarriesTheSessionsToken`, `TestMyBookingsPageMeetsTheDefinitionOfDone_AC30_AC42_AC87` |
+| AC-7 | `TestAC7_CancelBookingFormsAreOnTheLabPageAndMyBookings`, `TestAC7_DB_CancelBookingRemovesTheRowAndFreesThePlace`, `TestAC7_DB_CancelRemovesTheRowAndFreesThePlace`, `TestAC7_StudentCancelsABookingAndThePlaceComesBack`, `TestCancelBookingFreesThePlace_AC7` |
+| AC-49 | `TestAC49_CancellingWithoutABookingIs404`, `TestAC49_DB_CancellingABookingYouDoNotHave`, `TestCancelBookingYouDoNotHaveIsNotFound_AC49` |
+| AC-50 | `TestAC50_DB_ABookingThatWaitedForACancelGetsTheFreedPlace`, `TestAC50_DB_AfterACancelAnotherStudentFillsTheLastPlace` |
+| AC-88 | `TestAC88_CancellingAfterTheStartIs409`, `TestAC88_DB_CancelAfterTheStartKeepsTheBooking`, `TestCancelBookingAfterTheStartIsRefused_AC88`, `TestCancelBookingRefusedByTheCheckKeepsTheRow_AC88` |
+| AC-89 | `TestAC89_BookedSessionShowsBookedAfterAReload`, `TestBookingsOfAndSessionsBookedByAreTheUsersOwn_AC89_AC90`, `TestListsMarkTheStudentsOwnSessions_AC89` |
+| AC-90 | `TestAC90_DB_AStaffCancelShowsOnTheStudentsBookings`, `TestAC90_MyBookingsShowsTitleTimeAndCancelledByStaff`, `TestAC90_NoBookingsYetSaysSo`, `TestBookingsOfAndSessionsBookedByAreTheUsersOwn_AC89_AC90`, `TestMyBookingsListsOwnBookingsAndMarksCancelled_AC90`, `TestMyBookingsPastAreMostRecentFirst_AC90` |
 
 ## Spec vs result
 <!-- After the agent builds the slice: which criteria passed, which it missed or reinterpreted, and what you changed in this spec because of it. -->
@@ -343,7 +349,7 @@ Decisions taken while building it:
 - One endpoint for both clients: a request with `Accept: application/json` gets JSON, a plain form post gets a redirect or the error page.
 - The booking rules (already booked, not open today, full) live in `Labs.Book` and are passed to `store.BookLab`, which runs them inside its transaction while the lab is locked. The rules stay in the service, and atomicity stays in the store.
 - No CSRF token: the session cookie is `SameSite=Lax`, so a cross-site POST carries no session. (Replaced in Slice 3e by CSRF tokens.)
-- `/bookings` and the Cancel button move to Slice 4, with cancelling. After a booking, the script turns the button into a disabled "Booked". A reload shows "Book" again until Slice 4 knows the caller's own bookings; pressing it then gives "You have already booked this lab".
+- `/bookings` and the Cancel button move to Slice 4, with cancelling. After a booking, the script turns the button into a disabled "Booked". A reload shows "Book" again until Slice 4 knows the caller's own bookings; pressing it then gives "You have already booked this lab". (Closed in Slice 4: a reload shows "Booked".)
 
 What changed in this spec because of it:
 - AC-48 gives the status and the exact sentence.
@@ -485,3 +491,36 @@ What changed in this spec because of it:
 - The Auth section says how the token is made and that the server needs a 32-character `SESSION_SECRET`.
 - The Slice 3 note that relied on `SameSite=Lax` alone is marked as replaced.
 - The Architecture section says where the token check sits.
+
+### Slice 4 (checked 2026-11-18)
+Checked with `go vet ./...` and `go test ./...` against the in-memory store and a real `labwiz_test` database (no test skipped), `go test -race` on the cancel and booking tests, by breaking the cancel's lock and the "Booked" button on purpose, and by reading the code. Service coverage stays at 100%.
+
+| Criterion | Result | Notes |
+| --- | --- | --- |
+| AC-7 | Passed | Cancelling from `/bookings` or `/labs/{id}` deletes the row, the count goes up by 1, and the session can be booked again. The POST redirects to `/bookings` with "Booking cancelled.". |
+| AC-49 | Passed | A session the student did not book, including one another student booked, gives 404 "You have no booking for this session."; an unknown session gives the session 404. Nobody's booking changes. |
+| AC-50 | Passed | Sequentially against PostgreSQL, as written, and as a store race: a cancel holds the session lock while another student's booking of the full session waits, then gets the freed place, and the count equals the limit. Without `FOR UPDATE OF s` in `CancelBooking` the race test failed. |
+| AC-88 | Passed | A running or finished session gives 409 with the sentence and the booking is kept; `/bookings` offers no cancel for it. |
+| AC-89 | Passed | `/labs` and `/labs/{id}` show a disabled "Booked" after a reload, for the student who booked only. Showing "Book" again in the template made the test fail. |
+| AC-90 | Passed | `/bookings` lists title (linked to the lab), day and time, upcoming first and past most recent first; a cancelled session reads "Cancelled by staff" and has no cancel button. With no bookings it says so, with a link to `/labs`. |
+| AC-87 | Passed, extended | Every POST form on `/bookings` carries the session's token, and a cancel without it is 403. |
+| AC-30, AC-42 | Passed | `/bookings` has its own title and no animations. |
+| AC-29, AC-41 | Not checked yet | `/bookings` at 375 px and by keyboard is still to be checked by hand. |
+
+Decisions taken while building it:
+- Cancelling deletes the row: free places are counted, so no schema change was needed.
+- The delete is keyed on the caller's id, so another student's booking can only ever be "not yours" (404). The MCP tool `cancel_booking` will rely on it.
+- A booking of a cancelled session that has not started can still be cancelled; it then leaves the list.
+- "Booked" comes from one extra query per page (`SessionsBookedBy`), for students only, so the list queries did not change.
+- `/labs` cards show only "Booked"; the "Cancel booking" button is on the lab page and on `/bookings`, to keep the cards compact.
+- `/bookings` is for students: staff get 403 and no header link.
+
+What went wrong:
+- A shell heredoc broke on quoting while writing the test files; they were written again with the editor tools.
+- The first version of the HTTP tests used two placeholder names that did not exist (`storeSessionView`, `omarlessStudent`); they were replaced with `store.SessionView` and an `addZoe` helper before anything was committed.
+- Pressing "Cancel booking" in the browser cancelled the booking but then showed a second "Booked" button and "undefined of undefined places free" until a reload. The cancel form had the class `book-form`, so `booking.js` took it over, followed the redirect to `/bookings` and read the 200 as a booking. The HTTP tests post forms without the script, so they missed it. The cancel form now has its own class and posts normally; `TestAC7_OnlyBookFormsAreTakenOverByTheBookingScript` checks that only Book forms carry `book-form`, and failed with the old class.
+- The handler tests now take about 50–60 s instead of about 22 s. The slowdown appeared with step 1, which did not touch the handlers; not investigated yet.
+
+What changed in this spec because of it:
+- The Architecture section says that cancelling a booking takes the session lock.
+- The Slice 3 note about "Book" after a reload is marked as closed.

@@ -39,7 +39,7 @@
      it can still be cancelled: not started, and not cancelled by its owner. */}}
 {{define "cancelBookingForm"}}
 {{if and .Mine (not .Started) (not .Cancelled)}}
-<form method="post" action="/sessions/{{.SessionID}}/cancel-booking" class="book-form">
+<form method="post" action="/sessions/{{.SessionID}}/cancel-booking" class="cancel-booking-form">
   {{template "csrf" .CSRF}}
   <button type="submit" class="button button--secondary" aria-describedby="session-{{.SessionID}}-title">Cancel booking</button>
 </form>

@@ -66,6 +66,24 @@ func TestAC7_CancelBookingFormsAreOnTheLabPageAndMyBookings(t *testing.T) {
 	}
 }
 
+// booking.js takes over every form with class "book-form" and treats any 200 as a booking. A cancel
+// form with that class was cancelled by the script and then shown as "Booked", so only Book forms may
+// carry it; the cancel form posts normally.
+func TestAC7_OnlyBookFormsAreTakenOverByTheBookingScript(t *testing.T) {
+	base, _ := newStaffApp(t)
+	c := signedIn(t, base, studentEmail, studentPass)
+	bookByForm(t, c, base, "/sessions/1/book")
+	scripted := regexp.MustCompile(`<form[^>]*class="book-form"[^>]*>`)
+	action := regexp.MustCompile(`action="/sessions/\d+/book"`)
+	for _, path := range []string{"/labs", "/labs/1", "/bookings"} {
+		for _, form := range scripted.FindAllString(do(t, c, http.MethodGet, base+path, nil).body, -1) {
+			if !action.MatchString(form) {
+				t.Errorf("%s: booking.js takes over %s", path, form)
+			}
+		}
+	}
+}
+
 func TestAC49_CancellingWithoutABookingIs404(t *testing.T) {
 	base, st := newStaffApp(t)
 	c := signedIn(t, base, studentEmail, studentPass)

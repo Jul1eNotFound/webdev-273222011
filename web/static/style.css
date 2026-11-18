@@ -252,6 +252,7 @@ a {
   font-size: var(--font-size-sm);
 }
 
-.book-form {
+.book-form,
+.cancel-booking-form {
   margin: var(--space-3) 0 0;
 }
