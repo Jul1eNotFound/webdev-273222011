@@ -21,7 +21,9 @@ type pageData struct {
 	Title string
 	User  *service.Caller
 	// CSRF is the signed-in session's token for the page's forms and the booking script (AC-87).
-	CSRF    string
+	CSRF string
+	// Path is the request path, so the header can mark the page the user is on.
+	Path    string
 	Error   string
 	Success string
 	Email   string
@@ -99,6 +101,7 @@ func longDay(loc *time.Location) func(t time.Time) string {
 // page renders into a buffer first, so a template error never sends half a page.
 func (h *handler) page(w http.ResponseWriter, r *http.Request, status int, name string, data pageData) {
 	data.CSRF = auth.CSRFFrom(r.Context())
+	data.Path = r.URL.Path
 	var buf bytes.Buffer
 	if err := h.rn.pages[name].ExecuteTemplate(&buf, "layout", data); err != nil {
 		h.Log.Error("render page", "page", name, "err", err)

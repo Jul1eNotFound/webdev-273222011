@@ -61,7 +61,7 @@ lab booking
   4. **Staff: my labs, add lab** (`/staff/labs`, `/staff/labs/new`): the labs the signed-in staff member owns, each with its next session, and a form with title, description and place limit. Students get 403.
   5. **Staff: one owned lab** (`/staff/labs/{id}`): the lab's details, an "Add a session" form (Starts and Ends as dates with times, so a session may run past midnight, and an optional "Repeat weekly until" date that adds the same session every week, at most 26), and its sessions grouped by date, upcoming first, each with the places booked, the students who booked it and a "Cancel session" link. A "Delete lab" link while nobody has booked it. Only the owner may open it; everyone else gets 403.
   6. **Confirmations** (`/staff/labs/{id}/delete`, `/staff/sessions/{id}/cancel`): one sentence naming what will change, a button that confirms it (POST), and a link back that changes nothing.
-- Layout: a single column that works at 380 px and widens to a centred max width on desktop. The header has the app name, the signed-in user and a Sign out button, and for staff "My labs" and "Add a lab". Light theme only.
+- Layout: a single column that works at 380 px and widens to a centred max width on desktop. The header has the app name (a link to `/labs`), a "Labs" link to the lab list, "My bookings" for students or "My labs" and "Add a lab" for staff, the signed-in user and a Sign out button. The link of the page the user is on is marked `aria-current="page"` and underlined. Light theme only.
 - States, on every screen: loading (static "Loading…" text), empty, error (one readable sentence) and success (a message at the top of the page, no reload needed).
 
 ## Architecture
