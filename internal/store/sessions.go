@@ -14,8 +14,7 @@ func (s *Store) CreateSession(ctx context.Context, idHash []byte, userID int64, 
 
 // SessionUser returns the user of a session that has not expired at now.
 func (s *Store) SessionUser(ctx context.Context, idHash []byte, now time.Time) (User, error) {
-	return scanUser(s.db.QueryRow(ctx, `
-		SELECT u.id, u.email, u.name, u.password, u.role
+	return scanUser(s.db.QueryRow(ctx, `SELECT `+userColumns+`
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.id_hash = $1 AND s.expires_at > $2`, idHash, now))
 }

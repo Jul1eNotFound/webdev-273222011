@@ -26,6 +26,11 @@ var (
 	ErrUnauthenticated    = &Error{KindUnauthenticated, "Please sign in to continue."}
 	ErrForbidden          = &Error{KindForbidden, "You are not allowed to do this."}
 
+	// Google sign-in (Slice 6). Each is one sentence for the sign-in page.
+	ErrGoogleNoAccount    = &Error{KindUnauthenticated, "No Labwiz account uses this Google address. Ask staff to add you."}
+	ErrGoogleUnverified   = &Error{KindUnauthenticated, "Google has not verified this email address, so it cannot be used to sign in."}
+	ErrGoogleOtherAccount = &Error{KindUnauthenticated, "This Labwiz account is linked to a different Google account."}
+
 	ErrLabNotFound       = &Error{KindNotFound, "This lab does not exist."}
 	ErrDuplicateTitle    = &Error{KindConflict, "A lab with this title already exists. Please choose a different title."}
 	ErrTitleRequired     = &Error{KindValidation, "Please enter a title."}

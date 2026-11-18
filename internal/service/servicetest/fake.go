@@ -33,6 +33,9 @@ type Store struct {
 	ErrSessionsOfLab, ErrSessionBookers, ErrAddSessions, ErrBookSession error
 	ErrSessionByID, ErrCancelSession, ErrDeleteLab                      error
 	ErrCancelBooking, ErrBookingsOf, ErrSessionsBookedBy                error
+	ErrUserByGoogleID, ErrLinkGoogle                                    error
+	// BeforeLinkGoogle, when set, runs just before LinkGoogle, as another sign-in racing this one would.
+	BeforeLinkGoogle func()
 
 	// booked holds the (user id, session id) pairs booked through BookSession, like the unique
 	// constraint on bookings.
@@ -61,6 +64,62 @@ func (s *Store) Sessions() []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// User returns the stored user with this email, for tests to inspect.
+func (s *Store) User(email string) store.User {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.users[email]
+}
+
+// SetGoogleID links a user directly, as a sign-in elsewhere would.
+func (s *Store) SetGoogleID(email, googleID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u := s.users[email]
+	u.GoogleID = googleID
+	s.users[email] = u
+}
+
+func (s *Store) UserByGoogleID(_ context.Context, googleID string) (store.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrUserByGoogleID != nil {
+		return store.User{}, s.ErrUserByGoogleID
+	}
+	for _, u := range s.users {
+		if u.GoogleID != "" && u.GoogleID == googleID {
+			return u, nil
+		}
+	}
+	return store.User{}, store.ErrNotFound
+}
+
+// LinkGoogle behaves like the conditional UPDATE: only a user with no Google account is linked, and one
+// Google account links to one user.
+func (s *Store) LinkGoogle(_ context.Context, userID int64, googleID string) error {
+	if s.BeforeLinkGoogle != nil {
+		s.BeforeLinkGoogle()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrLinkGoogle != nil {
+		return s.ErrLinkGoogle
+	}
+	for _, u := range s.users {
+		if u.GoogleID == googleID && u.ID != userID {
+			return store.ErrDuplicate
+		}
+	}
+	for email, u := range s.users {
+		if u.ID == userID && u.GoogleID == "" {
+			u.GoogleID = googleID
+			s.users[email] = u
+			return nil
+		}
+	}
+	return store.ErrNotFound
 }
 
 func (s *Store) UserByEmail(_ context.Context, email string) (store.User, error) {

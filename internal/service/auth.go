@@ -70,6 +70,9 @@ type AuthStore interface {
 	CreateSession(ctx context.Context, idHash []byte, userID int64, expiresAt time.Time) error
 	SessionUser(ctx context.Context, idHash []byte, now time.Time) (store.User, error)
 	DeleteSession(ctx context.Context, idHash []byte) error
+	// Google sign-in (Slice 6).
+	UserByGoogleID(ctx context.Context, googleID string) (store.User, error)
+	LinkGoogle(ctx context.Context, userID int64, googleID string) error
 }
 
 type PasswordChecker interface {
@@ -106,11 +109,62 @@ func (a *Auth) Login(ctx context.Context, email, password string) (Session, erro
 	if !a.passwords.Compare(u.PasswordHash, password) {
 		return Session{}, ErrInvalidCredentials
 	}
+	return a.startSession(ctx, u.ID)
+}
+
+// startSession makes a new session for a user, the same for every way of signing in.
+func (a *Auth) startSession(ctx context.Context, userID int64) (Session, error) {
 	s := Session{Token: rand.Text(), ExpiresAt: a.now().Add(SessionTTL)}
-	if err := a.store.CreateSession(ctx, hashToken(s.Token), u.ID, s.ExpiresAt); err != nil {
+	if err := a.store.CreateSession(ctx, hashToken(s.Token), userID, s.ExpiresAt); err != nil {
 		return Session{}, fmt.Errorf("create session: %w", err)
 	}
 	return s, nil
+}
+
+// GoogleIdentity is what Google says about the person signing in: its account id ("sub"), which never
+// changes, and an email address that may change and may not be verified.
+type GoogleIdentity struct {
+	Subject       string
+	Email         string
+	EmailVerified bool
+}
+
+// GoogleSignIn signs in with a Google account (Slice 6). A linked account is matched on Google's id
+// alone, so a changed email still finds the same user (AC-53). Otherwise the account with the same email
+// is linked, but only when Google has verified that email (AC-20, AC-52). Accounts are seeded: an
+// address that matches none is refused, not signed up.
+func (a *Auth) GoogleSignIn(ctx context.Context, id GoogleIdentity) (Session, error) {
+	if id.Subject == "" {
+		return Session{}, errors.New("google identity without a subject")
+	}
+	for attempt := 0; ; attempt++ {
+		u, err := a.store.UserByGoogleID(ctx, id.Subject)
+		if err == nil {
+			return a.startSession(ctx, u.ID)
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return Session{}, fmt.Errorf("look up google account: %w", err)
+		}
+		u, err = a.store.UserByEmail(ctx, strings.ToLower(strings.TrimSpace(id.Email)))
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			return Session{}, ErrGoogleNoAccount
+		case err != nil:
+			return Session{}, fmt.Errorf("look up user: %w", err)
+		case !id.EmailVerified:
+			return Session{}, ErrGoogleUnverified
+		case u.GoogleID != "":
+			return Session{}, ErrGoogleOtherAccount
+		}
+		// The database decides a race: if another sign-in linked first, look again, once.
+		err = a.store.LinkGoogle(ctx, u.ID, id.Subject)
+		if err == nil {
+			return a.startSession(ctx, u.ID)
+		}
+		if attempt > 0 || !(errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrDuplicate)) {
+			return Session{}, fmt.Errorf("link google account: %w", err)
+		}
+	}
 }
 
 // Logout ends the session. An empty token is not an error.
