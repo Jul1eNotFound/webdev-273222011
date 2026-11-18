@@ -27,6 +27,8 @@ type pageData struct {
 	Error   string
 	Success string
 	Email   string
+	// GoogleEnabled shows "Sign in with Google" on the sign-in page (Slice 6).
+	GoogleEnabled bool
 	// Sessions is the lab list (/labs).
 	Sessions []service.SessionCard
 	// Day is the day the lab list shows, with its neighbours (AC-80).

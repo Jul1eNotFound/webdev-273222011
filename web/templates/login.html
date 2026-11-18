@@ -8,4 +8,6 @@
   <input id="password" name="password" type="password" autocomplete="current-password" required>
   <button type="submit" class="button">Sign in</button>
 </form>
+{{if .GoogleEnabled}}<p class="login-alt">or</p>
+<p><a class="button button--secondary" href="/auth/google">Sign in with Google</a></p>{{end}}
 {{end}}

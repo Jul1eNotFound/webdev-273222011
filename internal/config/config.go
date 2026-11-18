@@ -17,6 +17,10 @@ type Config struct {
 	// Only cmd/seed needs these. They are never stored as plain text.
 	SeedStudentPassword string
 	SeedStaffPassword   string
+
+	// Sign in with Google (Slice 6). Without both, the button is hidden.
+	GoogleClientID     string
+	GoogleClientSecret string
 }
 
 func Load() (Config, error) {
@@ -27,11 +31,23 @@ func Load() (Config, error) {
 		SessionSecret:       os.Getenv("SESSION_SECRET"),
 		SeedStudentPassword: os.Getenv("SEED_STUDENT_PASSWORD"),
 		SeedStaffPassword:   os.Getenv("SEED_STAFF_PASSWORD"),
+		GoogleClientID:      os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret:  os.Getenv("GOOGLE_CLIENT_SECRET"),
 	}
 	if c.DatabaseURL == "" {
 		return c, errors.New("DATABASE_URL is not set")
 	}
 	return c, nil
+}
+
+// GoogleEnabled is true when an OAuth client is configured for Sign in with Google.
+func (c Config) GoogleEnabled() bool {
+	return c.GoogleClientID != "" && c.GoogleClientSecret != ""
+}
+
+// GoogleRedirectURL is the callback URL to register with Google.
+func (c Config) GoogleRedirectURL() string {
+	return strings.TrimRight(c.PublicBaseURL, "/") + "/auth/google/callback"
 }
 
 // SecureCookies is true when the app is served over https.

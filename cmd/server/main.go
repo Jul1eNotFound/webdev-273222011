@@ -49,11 +49,18 @@ func run(log *slog.Logger) error {
 	}
 
 	st := store.New(pool)
+	// A nil interface, not a nil *auth.Google, when Google is not configured: the button stays hidden.
+	var google handler.GoogleProvider
+	if cfg.GoogleEnabled() {
+		google = auth.NewGoogle(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL())
+		log.Info("sign in with google is on", "redirect", cfg.GoogleRedirectURL())
+	}
 	h, err := handler.New(handler.Deps{
 		Auth:          service.NewAuth(st, auth.Bcrypt{}, time.Now),
 		Labs:          service.NewLabs(st, time.Now, time.Local),
 		SecureCookies: cfg.SecureCookies(),
 		CSRF:          csrf,
+		Google:        google,
 		Log:           log,
 	})
 	if err != nil {

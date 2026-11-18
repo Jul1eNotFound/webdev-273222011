@@ -112,6 +112,11 @@ a {
   margin: 0;
 }
 
+.login-alt {
+  margin: var(--space-4) 0 var(--space-2);
+  color: var(--color-muted);
+}
+
 .form {
   display: flex;
   flex-direction: column;

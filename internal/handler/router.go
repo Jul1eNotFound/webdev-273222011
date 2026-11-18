@@ -20,7 +20,9 @@ type Deps struct {
 	SecureCookies bool
 	// CSRF makes and checks the token on every form that changes something (Slice 3e).
 	CSRF auth.CSRF
-	Log  *slog.Logger
+	// Google is "Sign in with Google" (Slice 6), or nil when no OAuth client is configured.
+	Google GoogleProvider
+	Log    *slog.Logger
 }
 
 type handler struct {
@@ -75,6 +77,10 @@ func New(d Deps) (http.Handler, error) {
 	// they sit outside the cookie and CSRF groups.
 	r.Handle("/mcp", mcpserver.New(h.Labs, h.Auth, h.Log))
 	r.Get("/login", h.loginForm)
+	// Google sign-in is two GETs outside the session groups: the state cookie, not a CSRF token,
+	// ties the callback to the browser that started it.
+	r.Get("/auth/google", h.googleStart)
+	r.Get("/auth/google/callback", h.googleCallback)
 	r.Post("/login", h.login)
 
 	r.Group(func(r chi.Router) {

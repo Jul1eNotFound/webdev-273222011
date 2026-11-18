@@ -48,15 +48,20 @@ func tokenFor(c *http.Client, u string) string {
 	return ""
 }
 
-// newServer serves the app over the given stores, which may be the fake or the real one.
-func newServer(t *testing.T, as service.AuthStore, ls service.LabStore) *httptest.Server {
+// newServer serves the app over the given stores, which may be the fake or the real one. opts may change
+// the dependencies, for example to add a fake Google.
+func newServer(t *testing.T, as service.AuthStore, ls service.LabStore, opts ...func(*handler.Deps)) *httptest.Server {
 	t.Helper()
-	h, err := handler.New(handler.Deps{
+	deps := handler.Deps{
 		Auth: service.NewAuth(as, auth.Bcrypt{}, clock),
 		Labs: service.NewLabs(ls, clock, time.UTC),
 		Log:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		CSRF: testCSRF,
-	})
+	}
+	for _, o := range opts {
+		o(&deps)
+	}
+	h, err := handler.New(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
