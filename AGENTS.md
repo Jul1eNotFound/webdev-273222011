@@ -23,7 +23,7 @@ See `SPEC.md` for goals, non-goals and acceptance criteria.
   - `internal/store/` holds the data layer and is the only place that writes SQL.
   - `internal/model/` holds the one file that names the AI provider.
   - `internal/auth/` holds sessions, bcrypt and the Google OAuth flow.
-  - `mcp-server/` holds the MCP tools.
+  - `internal/mcpserver/` holds the MCP tools, served at `/mcp`; `cmd/mcptoken/` prints a token for an MCP client. `mcp-server/` is the Exercise 1 coursework, not part of the app.
   - `migrations/` holds the numbered SQL files.
   - `web/templates/` and `web/static/` hold the server-rendered HTML, the single stylesheet and the small scripts.
 - Naming: Go standard style. Packages are lowercase single words. Files are `snake_case.go`. Tests are `*_test.go` beside the code. DB tables are plural `snake_case` (`users`, `labs`, `bookings`). Routes are lowercase, as in SPEC (`/labs`, `/staff/labs/new`).

@@ -38,6 +38,7 @@ lab booking
 - Linking: matched on Google's account id. An address Google has not marked as verified is
   never linked to an existing account.
 - Forms: every form that changes something carries a CSRF token tied to the sign-in session: the HMAC-SHA256 of the session's cookie token under `SESSION_SECRET`, which must be at least 32 characters or the server does not start. The sign-in form is exempt, since there is no session yet.
+- MCP: each tool call carries `Authorization: Bearer <token>`, where the token is an ordinary sign-in session token printed by `go run ./cmd/mcptoken -email <account>` (it asks for the password and signs in through the same `Auth.Login`). It lasts 7 days like any session and grants exactly what that account may do. `/mcp` never reads the session cookie, so it needs no CSRF token.
 
 ## MCP tools
 | Tool | What it does | Who may call it |
@@ -82,7 +83,9 @@ A staff member adds a lab (`POST /staff/labs/new`):
 
 Slice 3a removed the earlier mismatch: `internal/handler/staff.go` used to call `service.RequireStaff` itself. The GET handler now asks `Labs.NewLabForm(caller)`, and `addLab` leaves the role check to `Labs.Add`, so HTTP and MCP refuse a student at the same point.
 
-This section describes the code as it is after Slice 4. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row. Cancelling a session (`Labs.CancelSession` → `CancelSession` in `internal/store/cancel_delete.go`) takes the same lock, so no booking gets in after a cancel. A student cancelling their own booking (`POST /sessions/{id}/cancel-booking` → `Labs.CancelBooking` → `CancelBooking` in `internal/store/my_bookings.go`) takes it too and deletes only the caller’s row, so a booking that waited for it gets the freed place. Deleting a lab is one `DELETE`: its sessions cascade, and the `ON DELETE RESTRICT` key on `bookings.session_id` from `000004_lab_sessions` refuses a lab that has any booking. The database decides, not a prior lookup, so a booking made while the delete runs is never lost. Every request that changes something passes the CSRF check in `require` in `internal/auth/session.go`, after the session and before any handler, so no route can forget it.
+This section describes the code as it is after Slice 5. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row. Cancelling a session (`Labs.CancelSession` → `CancelSession` in `internal/store/cancel_delete.go`) takes the same lock, so no booking gets in after a cancel. A student cancelling their own booking (`POST /sessions/{id}/cancel-booking` → `Labs.CancelBooking` → `CancelBooking` in `internal/store/my_bookings.go`) takes it too and deletes only the caller’s row, so a booking that waited for it gets the freed place. Deleting a lab is one `DELETE`: its sessions cascade, and the `ON DELETE RESTRICT` key on `bookings.session_id` from `000004_lab_sessions` refuses a lab that has any booking. The database decides, not a prior lookup, so a booking made while the delete runs is never lost. Every request that changes something passes the CSRF check in `require` in `internal/auth/session.go`, after the session and before any handler, so no route can forget it.
+
+An MCP tool call takes the same path from the service down. `POST /mcp` is mounted in `router.go` outside the cookie and CSRF groups and handled by `internal/mcpserver` (the SDK's stateless Streamable HTTP handler, capped at 1 MB). For `book_lab`, `addTool` in `server.go` reads `Authorization: Bearer <token>` and asks `Auth.CurrentUser` for the caller; the tool in `write.go` then calls `Labs.Book`, the same method as `POST /sessions/{id}/book`, and returns `service.MsgBooked` with the free places, the fields the booking script gets. A `*service.Error` becomes a tool error with its sentence. The tools never check a role and never reach the store.
 
 ## Decisions
 How the criteria are written:
@@ -109,6 +112,13 @@ The pages:
 - A time period is shown as `HH:MM–HH:MM` when it starts and ends on the same day, and as `D Mon HH:MM – D Mon HH:MM` otherwise, both in that timezone.
 - Error pages (400, 401, 403, 404, 405, 409, 500) count as one page and share one title.
 - From Slice 3a on, every role and ownership check runs in the service. Handlers and MCP tools pass the caller in and never check roles themselves.
+
+MCP (Slice 5):
+- The tools are served by the app at `/mcp` over Streamable HTTP, statelessly, with the official Go SDK (`github.com/modelcontextprotocol/go-sdk`). One process, so the deployed app has them too.
+- `initialize` and `tools/list` need no token; every tool call is checked. A missing, unknown or expired token gives the empty caller, which every service method refuses with "Please sign in to continue." before the store is touched.
+- A refusal is a tool error (`isError`) whose text is the service's sentence, the same as the web page shows. Any other error is logged and reported as "Something went wrong on our side. Please try again."
+- Times are RFC 3339 in the server's timezone; `schedule_session` takes `starts` and `ends` as `YYYY-MM-DDTHH:MM`, like the web form, so both get the same messages.
+- `get_lab` asks the service for the booking lists too, and leaves them out when the service refuses (anyone but the owner). The tool never decides who owns a lab.
 
 ## Acceptance criteria
 
@@ -245,7 +255,7 @@ The pages:
 | AC-12 | `TestAC12_DB_StaffAddsLabAndLabsGainsOneRow`, `TestAC12_StaffAddsLabAndItAppearsOnLabs`, `TestAddLabAcceptsAPlaceLimitOfOne_AC12`, `TestAddLabCreatesOneLab_AC12` |
 | AC-13 | `TestAddLabRejectsBadPlaceLimit_AC13`, `TestAC13_BadPlaceLimitShowsMessageAndCreatesNothing`, `TestAC13_DB_BadPlaceLimitCreatesNoRow` |
 | AC-2 | `TestAddLabDuplicateTitleIsConflict_AC2`, `TestAC2_DuplicateTitleIs409`, `TestAC2_DB_DuplicateTitleIs409AndNoRow` |
-| AC-14 | `TestAC14_DB_StaffSeesAStudentWhoBookedThroughTheApp`, `TestAC14_DB_StaffSeesExactlyTheStudentsWhoBooked`, `TestAC14_StaffSeesBookersTable`, `TestLabBookingsListsExactlyTheBookers_AC14`, `TestLabBookingsListsPastSessionsMostRecentFirst_AC14` |
+| AC-14 | `TestOwnerGetsBookersFromGetLabAndListLabBookings_AC14`, `TestAC14_DB_StaffSeesAStudentWhoBookedThroughTheApp`, `TestAC14_DB_StaffSeesExactlyTheStudentsWhoBooked`, `TestAC14_StaffSeesBookersTable`, `TestLabBookingsListsExactlyTheBookers_AC14`, `TestLabBookingsListsPastSessionsMostRecentFirst_AC14` |
 | AC-15 | `TestAddLabStudentIsForbidden_AC15`, `TestRequireStaff_AC15`, `TestNewLabFormIsForStaffOnly_AC15`, `TestAC15_StudentGetAndPostNewLabAre403`, `TestAC15_StudentPostOfNewLabIs403WithoutHandlerRoleCheck`, `TestAC15_DB_StudentGetsAndPosts403AndNoRow` |
 | AC-45 | `TestLabBookingsStudentIsForbidden_AC45`, `TestAC45_StudentGetsStaffLabPage403`, `TestAC45_DB_StudentGetsStaffLabPage403` |
 | AC-4 | `TestAC4_BookingScriptIsServedAndLoaded`, `TestAC4_DB_BookingAddsExactlyOneRowAndLowersTheCount`, `TestAC4_FormBookingRedirectsToTheLabWithConfirmation`, `TestAC4_ScriptBookingConfirmsAndReturnsTheNewCount`, `TestBookTakesOnePlace_AC4` |
@@ -290,6 +300,20 @@ The pages:
 | AC-50 | `TestAC50_DB_ABookingThatWaitedForACancelGetsTheFreedPlace`, `TestAC50_DB_AfterACancelAnotherStudentFillsTheLastPlace` |
 | AC-88 | `TestAC88_CancellingAfterTheStartIs409`, `TestAC88_DB_CancelAfterTheStartKeepsTheBooking`, `TestCancelBookingAfterTheStartIsRefused_AC88`, `TestCancelBookingRefusedByTheCheckKeepsTheRow_AC88` |
 | AC-89 | `TestAC89_BookedSessionShowsBookedAfterAReload`, `TestBookingsOfAndSessionsBookedByAreTheUsersOwn_AC89_AC90`, `TestListsMarkTheStudentsOwnSessions_AC89` |
+| AC-24 | `TestAC24_ToolsListShowsTheNineToolsWithDescriptions` |
+| AC-39 | `TestAC39_ACookieIsNotATokenForMCP`, `TestAC39_DB_ToolsWithoutAValidTokenChangeNothing`, `TestAC39_ToolsWithoutAValidTokenAreRefusedAndChangeNothing` |
+| AC-37 | `TestAC37_BookLabAndCancelBookingSayWhatTheWebPagesSay`, `TestAC37_DB_BookLabMatchesTheHTTPBooking` |
+| AC-25 | `TestAC25_BookLabOnAFullSessionIsRefused`, `TestAC25_DB_FullSessionIsRefusedWithTheHTTPSentence` |
+| AC-51 | `TestAC26_AC51_ToolsRefuseTheWrongRole`, `TestAC51_AC26_DB_TheWrongRoleChangesNothing` |
+| AC-38 | `TestAC38_AddLabWithATakenTitleIsRefused`, `TestAC38_DB_TakenTitleIsRefusedWithTheHTTPSentence` |
+| AC-26 | `TestAC26_AC51_ToolsRefuseTheWrongRole`, `TestAC51_AC26_DB_TheWrongRoleChangesNothing` |
+| AC-35 | `TestAC35_CancelBookingOfAnotherStudentsBookingIsRefused`, `TestAC35_DB_AnotherStudentsBookingIsKept` |
+| AC-36 | `TestAC36_StudentGetsTheLabWithoutBookersAndNoBookingList` |
+| AC-40 | `TestAC40_MyBookingsReturnsOnlyTheCallersBookings` |
+| AC-91 | `TestAC91_StaffWhoDoNotOwnTheLabGetNoBookingLists` |
+| AC-92 | `TestAC92_DB_ScheduleSessionAddsTheSameRowsAsTheWebPage`, `TestAC92_ScheduleSessionAddsAndRefusesLikeTheWebPage` |
+| AC-93 | `TestAC93_CancelSessionKeepsItsBookings`, `TestAC93_DB_CancelSessionKeepsItsBookingsLikeTheWebPage` |
+| AC-94 | `TestAC94_DB_OnlyTheOwnerSchedulesAndCancels`, `TestAC94_OnlyTheOwnerSchedulesAndCancelsSessions` |
 | AC-90 | `TestAC90_DB_AStaffCancelShowsOnTheStudentsBookings`, `TestAC90_MyBookingsShowsTitleTimeAndCancelledByStaff`, `TestAC90_NoBookingsYetSaysSo`, `TestBookingsOfAndSessionsBookedByAreTheUsersOwn_AC89_AC90`, `TestMyBookingsListsOwnBookingsAndMarksCancelled_AC90`, `TestMyBookingsPastAreMostRecentFirst_AC90` |
 
 ## Spec vs result
@@ -524,3 +548,40 @@ What went wrong:
 What changed in this spec because of it:
 - The Architecture section says that cancelling a booking takes the session lock.
 - The Slice 3 note about "Book" after a reload is marked as closed.
+
+### Slice 5 (checked 2026-11-18)
+Checked with `go vet ./...` and `go test ./...` against the in-memory store and a real `labwiz_test` database (no test skipped), `go test -race` on the MCP tests, by breaking the code on purpose four times, by calling the tools over plain JSON-RPC on a second server against the development database, and by hand from Claude Code in VS Code, as a student and as staff. Service coverage stays at 100%.
+
+| Criterion | Result | Notes |
+| --- | --- | --- |
+| AC-24 | Passed | `tools/list` without a token gives exactly the nine tools; every description says who may call it and what refuses it. |
+| AC-39 | Passed | All nine tools with no token, a made-up one and an expired one give "Please sign in to continue." and change nothing, in memory and in PostgreSQL. A signed-in browser cookie without the bearer header is refused too. Making a missing token act as a staff account made these tests fail. |
+| AC-37 | Passed | `book_lab` returns `{message, free_places, place_limit}` with "Booking confirmed.", and adds one row for the caller; a second student booking the same session through the booking script gets the same sentence and one place fewer. Giving the tool its own wording made the test fail. |
+| AC-25 | Passed | A full session gives the booking script's 409 sentence, "This lab is full.", and no row. |
+| AC-51, AC-26 | Passed | Staff are refused by `book_lab` and `cancel_booking`, students by `add_lab`; no row changes. Making `add_lab` treat every caller as staff made the test fail. |
+| AC-38 | Passed | A taken title gives the same sentence as `POST /staff/labs/new`, and no row; a place limit of 0 gives the form's sentence. |
+| AC-35 | Passed | Cancelling another student's booking gives "You have no booking for this session." and the row stays. |
+| AC-36 | Passed | A student is refused by `list_lab_bookings`, and `get_lab` returns the lab with no bookers field and no booker's name or email. |
+| AC-40 | Passed | `my_bookings` returns only the caller's bookings; staff are refused. |
+| AC-91 | Passed | Staff who do not own the lab: the same as AC-36. Their own lab comes with its booking list. Having `get_lab` ask for the lists as the owner made AC-36 and AC-91 fail. |
+| AC-92 | Passed | `schedule_session` with a weekly repeat adds exactly the rows the web form adds for the same input. A bad time, a time in the past, an overlap and an unknown lab give the web page's sentences and add nothing. |
+| AC-93 | Passed | `cancel_session` sets `cancelled_at` and keeps the bookings; the student's `/bookings` shows "Cancelled by staff". |
+| AC-94 | Passed | A student and staff who do not own the lab are refused by `schedule_session` and `cancel_session`; nothing changes. |
+| AC-14 | Passed, extended | The owner gets who booked from `get_lab` and `list_lab_bookings`. |
+
+Decisions taken while building it:
+- `/mcp` is part of the app, not a separate program, so the deployed app has the tools and tests reach them through the same router.
+- The token is an ordinary sign-in session token from `cmd/mcptoken`, so no schema change. Signing out on the web does not end it; it expires after 7 days.
+- "Booking confirmed." and "Booking cancelled." moved into the service (`MsgBooked`, `MsgBookingCancelled`), so the pages, the booking script and the tools cannot drift apart.
+- `.vscode/mcp.json` now connects VS Code to `/mcp` instead of the Exercise 1 lecture server, and `.mcp.json` does the same for Claude Code. Both read `${MCP_TOKEN}` and hold no secret. The `mcp-server/` folder (Exercise 1) stays as coursework.
+
+What went wrong:
+- `cmd/mcptoken` seemed not to accept a password: in a console the typing is hidden and the prompt did not say so, and in Git Bash the program saw no console and waited without any prompt. Both prompts now say what to do.
+- `claude mcp add` failed with "command not found": Claude Code runs as the VS Code extension here, with no `claude` command on the path. A project `.mcp.json` replaced it; the extension only sees `MCP_TOKEN` after VS Code is restarted.
+- Three DB tests first used `seeded()`, which only finds today's sessions, for tomorrow's session; they now use `firstSessionOfView()`.
+- Shell heredocs broke on quoting twice while writing test files and this section; they were written with the editor instead.
+
+What changed in this spec because of it:
+- The Auth section says how an MCP caller signs in.
+- The Decisions section has an MCP part.
+- The Architecture section traces a tool call.
