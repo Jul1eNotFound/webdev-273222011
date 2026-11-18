@@ -13,7 +13,7 @@ See `SPEC.md` for goals, non-goals and acceptance criteria.
 - Migrate and seed: `go run ./cmd/migrate up && go run ./cmd/seed` (golang-migrate, used as a library; `down` reverts). Seed needs `SEED_STUDENT_PASSWORD` and `SEED_STAFF_PASSWORD`, creates `student@labwiz.test` and `staff@labwiz.test`, and re-dates the demo labs to today on every run. It also adds demo staff, students, labs and bookings (`internal/seed/demo.go`); their random passwords go to `seed-credentials.txt`, which git ignores and the next run reuses. Tests use only `seed.Run`, never the demo data.
 - Test: `go test ./...` (needs `TEST_DATABASE_URL`, a separate PostgreSQL database; never point it at the development database)
 - Coverage: `go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out`. This only reports numbers; the gate (100% of `internal/service`, 80% overall) is enforced in CI.
-- MCP server: `go run ./mcp-server` (needs `MCP_TOKEN` and `DATABASE_URL`)
+- MCP: the tools are served by the app itself at `/mcp` (Streamable HTTP), so `go run ./cmd/server` is all it takes. A client signs in with `Authorization: Bearer <token>`; get a token with `go run ./cmd/mcptoken -email <account>` (asks for the password; prints only the token, so `MCP_TOKEN=$(go run ./cmd/mcptoken -email …)` works). Claude Code (CLI and VS Code extension) connects through `.mcp.json`, and VS Code's own MCP client through `.vscode/mcp.json`; both read `${MCP_TOKEN}` from the environment and hold no secret. The extension only sees variables set before VS Code started, so on Windows store the token with `[Environment]::SetEnvironmentVariable("MCP_TOKEN", $t, "User")` and restart VS Code; tokens last 7 days. With the CLI installed, `claude mcp add --transport http labwiz http://localhost:3000/mcp --header "Authorization: Bearer $MCP_TOKEN"` works too. MCP Inspector: `npx @modelcontextprotocol/inspector`, transport Streamable HTTP, the same URL and header.
 
 ## Conventions
 - Layout:
@@ -42,7 +42,7 @@ See `SPEC.md` for goals, non-goals and acceptance criteria.
 Requests arrive two ways and both end in the same place:
 
 - HTTP route handler (`internal/handler/`, routes in `router.go`; session check in `internal/auth/session.go`) → service (`internal/service/`) → data access (`internal/store/`) → database (`migrations/`)
-- MCP tool (`mcp-server/`) → **the same service** → data access → database
+- MCP tool (`internal/mcpserver/`, mounted at `/mcp` in `router.go`) → **the same service** → data access → database
 
 Tests without a database use the in-memory store in `internal/service/servicetest`. Tests with a database call `storetest.Open`, which skips when `TEST_DATABASE_URL` is unset.
 
@@ -60,7 +60,8 @@ that talks to the database directly is a second, unguarded way into your data: n
 
 ## The MCP server
 <!-- Where it lives and how it authenticates. -->
-- Lives in `mcp-server/`, grew out of Exercise 1.
+- Lives in `internal/mcpserver/`, served by the app at `/mcp`. The Node.js server in `mcp-server/` is the Exercise 1 coursework (the lecture tools) and is not part of the app.
+- Each tool call is authenticated by its own `Authorization: Bearer <token>`, a sign-in session token from `cmd/mcptoken`; the session cookie is never read, so `/mcp` needs no CSRF token. A missing or expired token gives the empty caller, which every service method refuses.
 - Every tool calls a service function; none touches the data layer or the database directly.
 - It carries a user, and enforces exactly the same authorization rules as the HTTP API.
 - Adding a tool means adding a row to the table in `SPEC.md` too.
