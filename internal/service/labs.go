@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -24,6 +25,9 @@ type LabStore interface {
 	SessionByID(ctx context.Context, id int64) (store.SessionView, error)
 	CancelSession(ctx context.Context, sessionID int64, now time.Time, check store.CancelCheck) (store.SessionView, error)
 	DeleteLab(ctx context.Context, labID int64) error
+	CancelBooking(ctx context.Context, userID, sessionID int64, check store.CancelBookingCheck) (store.SessionView, error)
+	BookingsOf(ctx context.Context, userID int64) ([]store.SessionView, error)
+	SessionsBookedBy(ctx context.Context, userID int64, sessionIDs []int64) ([]int64, error)
 }
 
 // DateTimeLayout is how a session's start and end are typed: the value of an HTML datetime-local input.
@@ -65,6 +69,8 @@ type SessionCard struct {
 	Started bool
 	// Cancelled is true once the owner cancelled it (Slice 3c).
 	Cancelled bool
+	// Mine is true when the calling student has booked it (AC-89).
+	Mine bool
 }
 
 // LabPage is a lab with its sessions that have not ended, for /labs/{id}.
@@ -134,14 +140,38 @@ func (l *Labs) ListDay(ctx context.Context, caller Caller, date string) (DayList
 	if err != nil {
 		return DayList{}, fmt.Errorf("list sessions: %w", err)
 	}
+	cards, err := l.markMine(ctx, caller, l.cards(views))
+	if err != nil {
+		return DayList{}, err
+	}
 	return DayList{
 		Day:      day,
 		Today:    day.Equal(today),
 		Date:     day.Format(DateLayout),
 		Prev:     day.AddDate(0, 0, -1).Format(DateLayout),
 		Next:     next.Format(DateLayout),
-		Sessions: l.cards(views),
+		Sessions: cards,
 	}, nil
+}
+
+// markMine sets Mine on the sessions a student caller has booked, with one query, so the page can show
+// "Booked" (AC-89). Staff book nothing, so they need no query.
+func (l *Labs) markMine(ctx context.Context, caller Caller, cards []SessionCard) ([]SessionCard, error) {
+	if caller.Role != RoleStudent || len(cards) == 0 {
+		return cards, nil
+	}
+	ids := make([]int64, len(cards))
+	for i, c := range cards {
+		ids[i] = c.SessionID
+	}
+	mine, err := l.store.SessionsBookedBy(ctx, caller.ID, ids)
+	if err != nil {
+		return nil, fmt.Errorf("find own bookings: %w", err)
+	}
+	for i := range cards {
+		cards[i].Mine = slices.Contains(mine, cards[i].SessionID)
+	}
+	return cards, nil
 }
 
 // ListToday returns today's sessions: ListDay without a date.
@@ -180,6 +210,9 @@ func (l *Labs) Get(ctx context.Context, caller Caller, id int64) (LabPage, error
 		if v.EndsAt.After(l.now()) {
 			page.Sessions = append(page.Sessions, l.card(v))
 		}
+	}
+	if page.Sessions, err = l.markMine(ctx, caller, page.Sessions); err != nil {
+		return LabPage{}, err
 	}
 	return page, nil
 }

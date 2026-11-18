@@ -32,6 +32,7 @@ type Store struct {
 	ErrLabs, ErrCreateLab, ErrLabByID, ErrLabsOwnedBy                   error
 	ErrSessionsOfLab, ErrSessionBookers, ErrAddSessions, ErrBookSession error
 	ErrSessionByID, ErrCancelSession, ErrDeleteLab                      error
+	ErrCancelBooking, ErrBookingsOf, ErrSessionsBookedBy                error
 
 	// booked holds the (user id, session id) pairs booked through BookSession, like the unique
 	// constraint on bookings.
@@ -409,4 +410,68 @@ func (s *Store) DeleteLab(_ context.Context, labID int64) error {
 	s.Labs = slices.DeleteFunc(s.Labs, func(l store.Lab) bool { return l.ID == labID })
 	s.LabSessions = slices.DeleteFunc(s.LabSessions, func(x LabSession) bool { return x.LabID == labID })
 	return nil
+}
+
+// CancelBooking holds the mutex throughout, so it is as atomic as the real store's locked transaction.
+// Only a booking made through BookSession can be cancelled, keyed on the user, like the real DELETE.
+func (s *Store) CancelBooking(_ context.Context, userID, sessionID int64, check store.CancelBookingCheck) (store.SessionView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrCancelBooking != nil {
+		return store.SessionView{}, s.ErrCancelBooking
+	}
+	i := slices.IndexFunc(s.LabSessions, func(x LabSession) bool { return x.ID == sessionID })
+	if i < 0 {
+		return store.SessionView{}, store.ErrNotFound
+	}
+	key := [2]int64{userID, sessionID}
+	if !s.booked[key] {
+		return store.SessionView{}, store.ErrNoBooking
+	}
+	if err := check(s.view(s.LabSessions[i])); err != nil {
+		return store.SessionView{}, err
+	}
+	delete(s.booked, key)
+	// Remove the Booker that BookSession added for this user.
+	var me store.Booker
+	for _, u := range s.users {
+		if u.ID == userID {
+			me = store.Booker{Name: u.Name, Email: u.Email}
+		}
+	}
+	if j := slices.Index(s.Bookers[sessionID], me); j >= 0 {
+		s.Bookers[sessionID] = slices.Delete(s.Bookers[sessionID], j, j+1)
+	}
+	return s.view(s.LabSessions[i]), nil
+}
+
+// BookingsOf returns the sessions userID booked through BookSession, in time order.
+func (s *Store) BookingsOf(_ context.Context, userID int64) ([]store.SessionView, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrBookingsOf != nil {
+		return nil, s.ErrBookingsOf
+	}
+	var out []store.SessionView
+	for _, x := range s.sorted() {
+		if s.booked[[2]int64{userID, x.ID}] {
+			out = append(out, s.view(x))
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) SessionsBookedBy(_ context.Context, userID int64, sessionIDs []int64) ([]int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ErrSessionsBookedBy != nil {
+		return nil, s.ErrSessionsBookedBy
+	}
+	var out []int64
+	for _, id := range sessionIDs {
+		if s.booked[[2]int64{userID, id}] {
+			out = append(out, id)
+		}
+	}
+	return out, nil
 }
