@@ -1,0 +1,34 @@
+{{define "content"}}
+{{with .Success}}<p class="message message--success" role="status">{{.}}</p>{{end}}
+<h1>My bookings</h1>
+{{with .Bookings}}
+{{if or .Upcoming .Past}}
+<h2>Upcoming</h2>
+{{if .Upcoming}}
+<ul class="lab-list">
+  {{range .Upcoming}}{{template "myBooking" (bookArgs . $.CSRF)}}{{end}}
+</ul>
+{{else}}
+<p class="empty">No upcoming bookings.</p>
+{{end}}
+{{with .Past}}
+<h2>Past</h2>
+<ul class="lab-list">
+  {{range .}}{{template "myBooking" (bookArgs . $.CSRF)}}{{end}}
+</ul>
+{{end}}
+{{else}}
+<p class="empty">You have no bookings yet. <a href="/labs">Find a lab to book</a>.</p>
+{{end}}
+{{end}}
+{{end}}
+
+{{/* One of the student's bookings: the lab, its day and time, whether its owner cancelled it, and
+     "Cancel booking" while that is still possible (AC-7, AC-90). */}}
+{{define "myBooking"}}
+<li class="lab-list__item" data-session="{{.SessionID}}">
+  <h2 class="lab-card__title" id="session-{{.SessionID}}-title"><a href="/labs/{{.LabID}}">{{.Title}}</a></h2>
+  <p class="lab-meta"><span class="lab-card__period">{{day .StartsAt}}, {{period .StartsAt .EndsAt}}</span> · {{template "owner" .}}{{if .Cancelled}} · <span class="lab-card__cancelled">Cancelled by staff</span>{{end}}</p>
+  {{template "cancelBookingForm" .}}
+</li>
+{{end}}

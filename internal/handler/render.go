@@ -41,6 +41,8 @@ type pageData struct {
 	// CancelSession and DeleteLab are what a confirmation page is about (AC-76).
 	CancelSession *service.SessionCard
 	DeleteLab     *service.LabPage
+	// Bookings is the student's own bookings (/bookings, AC-90).
+	Bookings *service.BookingsPage
 }
 
 type renderer struct {
@@ -51,7 +53,7 @@ type renderer struct {
 func newRenderer(loc *time.Location) (*renderer, error) {
 	rn := &renderer{pages: map[string]*template.Template{}}
 	funcs := template.FuncMap{"period": period(loc), "day": day(loc), "longDay": longDay(loc), "bookArgs": bookArgs}
-	for _, name := range []string{"login", "labs", "lab", "error", "my_labs", "lab_new", "lab_staff", "confirm"} {
+	for _, name := range []string{"login", "labs", "lab", "error", "my_labs", "lab_new", "lab_staff", "confirm", "bookings"} {
 		t, err := template.New(name).Funcs(funcs).ParseFS(web.FS, "templates/layout.html", "templates/"+name+".html")
 		if err != nil {
 			return nil, err

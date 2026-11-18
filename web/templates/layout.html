@@ -15,7 +15,7 @@
       {{with .User}}
       <div class="user">
         {{if .IsStaff}}<a class="button button--secondary" href="/staff/labs">My labs</a>
-        <a class="button button--secondary" href="/staff/labs/new">Add a lab</a>{{end}}
+        <a class="button button--secondary" href="/staff/labs/new">Add a lab</a>{{else}}<a class="button button--secondary" href="/bookings">My bookings</a>{{end}}
         <span class="user__name">{{.Name}}</span>
         <form method="post" action="/logout">
           {{template "csrf" $.CSRF}}
@@ -35,6 +35,17 @@
 {{/* The owner of a lab (AC-61). */}}
 {{define "owner"}}<span class="lab-card__owner">Run by {{.OwnerName}}</span>{{end}}
 
+{{/* "Cancel booking" for a session the student booked, given as bookArgs card $.CSRF (AC-7). Only while
+     it can still be cancelled: not started, and not cancelled by its owner. */}}
+{{define "cancelBookingForm"}}
+{{if and .Mine (not .Started) (not .Cancelled)}}
+<form method="post" action="/sessions/{{.SessionID}}/cancel-booking" class="book-form">
+  {{template "csrf" .CSRF}}
+  <button type="submit" class="button button--secondary" aria-describedby="session-{{.SessionID}}-title">Cancel booking</button>
+</form>
+{{end}}
+{{end}}
+
 {{/* The CSRF token of the signed-in session, in every form that changes something (AC-87). */}}
 {{define "csrf"}}<input type="hidden" name="csrf" value="{{.}}">{{end}}
 
@@ -43,12 +54,13 @@
 
 {{/* The Book button of a session, given as bookArgs card $.CSRF: a real form, so it works without the script too (AC-8).
      It is disabled as "Closed" once the session has started (AC-83), and as "Full" when no place is left.
-     A cancelled session has no form at all, only the word "Cancelled" (AC-73). */}}
+     A cancelled session has no form at all, only the word "Cancelled" (AC-73), and one the student has
+     booked shows a disabled "Booked" (AC-89). */}}
 {{define "bookForm"}}
 {{if .Cancelled}}<p class="lab-card__cancelled">Cancelled</p>{{else}}
 <form method="post" action="/sessions/{{.SessionID}}/book" class="book-form">
   {{template "csrf" .CSRF}}
-  {{if .Started}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Closed</button>{{else if gt .FreePlaces 0}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title">Book</button>{{else}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Full</button>{{end}}
+  {{if .Mine}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Booked</button>{{else if .Started}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Closed</button>{{else if gt .FreePlaces 0}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title">Book</button>{{else}}<button type="submit" class="button" aria-describedby="session-{{.SessionID}}-title" disabled>Full</button>{{end}}
 </form>
 {{end}}
 {{end}}

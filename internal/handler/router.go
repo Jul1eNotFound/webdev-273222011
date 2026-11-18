@@ -78,6 +78,8 @@ func New(d Deps) (http.Handler, error) {
 		// Signing out changes something too, so it needs the session and its token (AC-85).
 		r.Post("/logout", h.logout)
 		r.Get("/labs", h.labsPage)
+		r.Get("/bookings", h.bookingsPage)
+		r.Post("/sessions/{id}/cancel-booking", h.cancelBooking)
 		r.Get("/labs/{id}", h.labPage)
 		r.Get("/staff/labs", h.myLabsPage)
 		r.Get("/staff/labs/new", h.newLabForm)
