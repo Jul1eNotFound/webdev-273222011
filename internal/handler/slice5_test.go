@@ -3,6 +3,7 @@ package handler_test
 import (
 	"context"
 	"crypto/sha256"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -14,28 +15,55 @@ import (
 // Chemistry basics today 09:00–12:00 (Ana and Ben booked it), Circuits workshop today 13:00–17:00 (Cleo)
 // and Robotics intro tomorrow. Sam is the student. The clock says 08:30.
 
-// readTools are the tools that change nothing, with arguments that would succeed for a caller allowed
-// to use them.
-var readTools = map[string]map[string]any{
+// allTools are the nine tools, each with arguments that would succeed for a caller allowed to use it.
+var allTools = map[string]map[string]any{
 	"list_labs":         {},
 	"get_lab":           {"lab_id": 1},
 	"my_bookings":       {},
 	"list_lab_bookings": {"lab_id": 1},
+	"book_lab":          {"session_id": 1},
+	"cancel_booking":    {"session_id": 1},
+	"add_lab":           {"title": "Optics", "description": "Lenses.", "place_limit": 4},
+	"schedule_session":  {"lab_id": 1, "starts": "2026-10-22T18:00", "ends": "2026-10-22T19:00"},
+	"cancel_session":    {"session_id": 3},
 }
 
-func TestAC39_ReadToolsWithoutAValidTokenAreRefused(t *testing.T) {
+func TestAC24_ToolsListShowsTheNineToolsWithDescriptions(t *testing.T) {
+	base, _ := newStaffApp(t)
+	res, err := mcpSession(t, base, "").ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, tool := range res.Tools {
+		names = append(names, tool.Name)
+		if len(tool.Description) < 20 {
+			t.Errorf("%s: description %q is under 20 characters", tool.Name, tool.Description)
+		}
+	}
+	want := slices.Collect(maps.Keys(allTools))
+	slices.Sort(names)
+	slices.Sort(want)
+	if !slices.Equal(names, want) {
+		t.Fatalf("tools = %v, want %v", names, want)
+	}
+}
+
+func TestAC39_ToolsWithoutAValidTokenAreRefusedAndChangeNothing(t *testing.T) {
 	base, st := newStaffApp(t)
 	// An expired session of Sam's: the token was real, but its session is over.
 	sum := sha256.Sum256([]byte("expired-token"))
 	if err := st.CreateSession(context.Background(), sum[:], 1, fixedNow.Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	before := fakeState(st)
 	for _, token := range []string{"", "made-up-token", "expired-token"} {
 		cs := mcpSession(t, base, token)
-		for name, args := range readTools {
+		for name, args := range allTools {
 			wantToolError(t, name+" with token "+token, callTool(t, cs, name, args), msgSignIn)
 		}
 	}
+	wantFakeUnchanged(t, st, before)
 }
 
 func TestAC39_ACookieIsNotATokenForMCP(t *testing.T) {

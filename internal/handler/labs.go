@@ -13,8 +13,6 @@ import (
 	"github.com/Jul1eNotFound/webdev-273222011/internal/service"
 )
 
-const msgBooked = "Booking confirmed."
-
 func (h *handler) labsPage(w http.ResponseWriter, r *http.Request) {
 	c, _ := auth.CallerFrom(r.Context())
 	// No date is today; a date that is not a real day is a 400 through fail (AC-81).
@@ -37,7 +35,7 @@ func (h *handler) labPage(w http.ResponseWriter, r *http.Request) {
 	}
 	data := pageData{Title: lab.Lab.Title + " · Labwiz", User: &c, LabPage: &lab}
 	if r.URL.Query().Get("booked") == "1" {
-		data.Success = msgBooked
+		data.Success = service.MsgBooked
 	}
 	h.page(w, r, http.StatusOK, "lab", data)
 }
@@ -66,7 +64,7 @@ func (h *handler) book(w http.ResponseWriter, r *http.Request) {
 		h.failJSON(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, bookingReply{Message: msgBooked, FreePlaces: &s.FreePlaces, PlaceLimit: &s.PlaceLimit})
+	writeJSON(w, http.StatusOK, bookingReply{Message: service.MsgBooked, FreePlaces: &s.FreePlaces, PlaceLimit: &s.PlaceLimit})
 }
 
 // idParam reads the {id} route parameter, a lab's or a session's. Anything that is not a number becomes

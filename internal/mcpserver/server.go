@@ -34,6 +34,7 @@ func New(labs *service.Labs, auth *service.Auth, log *slog.Logger) http.Handler 
 	s := &server{labs: labs, auth: auth, log: log,
 		mcp: mcp.NewServer(&mcp.Implementation{Name: "labwiz", Version: "0.5.0"}, nil)}
 	s.addReadTools()
+	s.addWriteTools()
 	h := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return s.mcp },
 		&mcp.StreamableHTTPOptions{Stateless: true})
 	return http.MaxBytesHandler(h, maxBody)

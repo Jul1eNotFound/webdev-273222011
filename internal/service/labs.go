@@ -30,6 +30,13 @@ type LabStore interface {
 	SessionsBookedBy(ctx context.Context, userID int64, sessionIDs []int64) ([]int64, error)
 }
 
+// MsgBooked and MsgBookingCancelled confirm a booking and its cancellation. The web pages, the booking
+// script and the MCP tools all show these, so they cannot drift apart (AC-37).
+const (
+	MsgBooked           = "Booking confirmed."
+	MsgBookingCancelled = "Booking cancelled."
+)
+
 // DateTimeLayout is how a session's start and end are typed: the value of an HTML datetime-local input.
 const DateTimeLayout = "2006-01-02T15:04"
 

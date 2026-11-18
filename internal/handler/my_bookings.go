@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/Jul1eNotFound/webdev-273222011/internal/auth"
+	"github.com/Jul1eNotFound/webdev-273222011/internal/service"
 )
 
 // bookingsPage lists the signed-in student's bookings (AC-90). Staff get 403 from the service.
@@ -16,7 +17,7 @@ func (h *handler) bookingsPage(w http.ResponseWriter, r *http.Request) {
 	}
 	data := pageData{Title: "My bookings · Labwiz", User: &c, Bookings: &page}
 	if r.URL.Query().Get("cancelled") == "1" {
-		data.Success = "Booking cancelled."
+		data.Success = service.MsgBookingCancelled
 	}
 	h.page(w, r, http.StatusOK, "bookings", data)
 }
