@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/Jul1eNotFound/webdev-273222011/internal/auth"
+	"github.com/Jul1eNotFound/webdev-273222011/internal/mcpserver"
 	"github.com/Jul1eNotFound/webdev-273222011/internal/service"
 	"github.com/Jul1eNotFound/webdev-273222011/web"
 )
@@ -70,6 +71,9 @@ func New(d Deps) (http.Handler, error) {
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/labs", http.StatusFound)
 	})
+	// The MCP tools (Slice 5) authenticate each call by its bearer token, never by the session cookie, so
+	// they sit outside the cookie and CSRF groups.
+	r.Handle("/mcp", mcpserver.New(h.Labs, h.Auth, h.Log))
 	r.Get("/login", h.loginForm)
 	r.Post("/login", h.login)
 
