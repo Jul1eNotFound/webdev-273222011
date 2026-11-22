@@ -57,6 +57,11 @@ type Labs struct {
 	store LabStore
 	now   Clock
 	loc   *time.Location
+
+	// Smart search (Slice 7): nil until WithSearchModel.
+	search        SearchModel
+	searchTimeout time.Duration
+	limiter       rateLimiter
 }
 
 // NewLabs takes the timezone that decides where "today" starts and ends.

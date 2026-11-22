@@ -10,6 +10,8 @@ const (
 	KindForbidden
 	KindNotFound
 	KindConflict
+	// KindUnavailable is a feature that cannot answer right now; the page falls back instead of failing.
+	KindUnavailable
 )
 
 // Error is a rule violation whose Message is one readable sentence, safe to show to the user.
@@ -63,4 +65,15 @@ var (
 	ErrRepeatBeforeStart = &Error{KindValidation, "The repeat date must be on or after the session's date."}
 	ErrRepeatTooLong     = &Error{KindValidation, "A weekly repeat can add at most 26 sessions."}
 	ErrSessionOverlap    = &Error{KindConflict, "This lab already has a session at that time."}
+
+	// Smart search (Slice 7). ErrSearchUnavailable covers every way the model can fail: the page then
+	// shows the unfiltered list with this sentence, never a 500 (AC-27).
+	ErrSearchUnavailable  = &Error{KindUnavailable, "Smart search is unavailable, showing all labs."}
+	ErrSearchEmpty        = &Error{KindValidation, "Please type what you are looking for."}
+	ErrSearchTooLong      = &Error{KindValidation, "Please keep your search to 200 characters or fewer."}
+	ErrSearchRangeOrder   = &Error{KindValidation, "The end date must not be before the start date."}
+	ErrSearchRangeTooLong = &Error{KindValidation, "Please choose a range of 31 days or fewer."}
+	ErrSearchTimeOfDay    = &Error{KindValidation, "Please choose morning, afternoon or evening."}
+	ErrSearchMinFree      = &Error{KindValidation, "The number of free places must be a whole number of 1 or more."}
+	ErrSearchKeywords     = &Error{KindValidation, "Please use at most 5 keywords of 50 characters or fewer."}
 )
