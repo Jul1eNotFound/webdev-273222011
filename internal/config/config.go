@@ -21,6 +21,11 @@ type Config struct {
 	// Sign in with Google (Slice 6). Without both, the button is hidden.
 	GoogleClientID     string
 	GoogleClientSecret string
+
+	// Smart search (Slice 7). Without the key the search box is hidden. The key goes only to the
+	// Anthropic client; it is never logged or sent to the browser (AC-34).
+	AnthropicAPIKey string
+	ModelName       string
 }
 
 func Load() (Config, error) {
@@ -33,6 +38,8 @@ func Load() (Config, error) {
 		SeedStaffPassword:   os.Getenv("SEED_STAFF_PASSWORD"),
 		GoogleClientID:      os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret:  os.Getenv("GOOGLE_CLIENT_SECRET"),
+		AnthropicAPIKey:     os.Getenv("ANTHROPIC_API_KEY"),
+		ModelName:           os.Getenv("MODEL_NAME"),
 	}
 	if c.DatabaseURL == "" {
 		return c, errors.New("DATABASE_URL is not set")

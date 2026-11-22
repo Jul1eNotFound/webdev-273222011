@@ -2,6 +2,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/Jul1eNotFound/webdev-273222011/internal/auth"
 	"github.com/Jul1eNotFound/webdev-273222011/internal/config"
 	"github.com/Jul1eNotFound/webdev-273222011/internal/handler"
+	"github.com/Jul1eNotFound/webdev-273222011/internal/model"
 	"github.com/Jul1eNotFound/webdev-273222011/internal/service"
 	"github.com/Jul1eNotFound/webdev-273222011/internal/store"
 )
@@ -55,9 +57,15 @@ func run(log *slog.Logger) error {
 		google = auth.NewGoogle(cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURL())
 		log.Info("sign in with google is on", "redirect", cfg.GoogleRedirectURL())
 	}
+	labs := service.NewLabs(st, time.Now, time.Local)
+	if cfg.AnthropicAPIKey != "" {
+		m := model.NewAnthropic(cfg.AnthropicAPIKey, cfg.ModelName)
+		labs.WithSearchModel(m)
+		log.Info("smart search is on", "model", cmp.Or(cfg.ModelName, model.DefaultModel))
+	}
 	h, err := handler.New(handler.Deps{
 		Auth:          service.NewAuth(st, auth.Bcrypt{}, time.Now),
-		Labs:          service.NewLabs(st, time.Now, time.Local),
+		Labs:          labs,
 		SecureCookies: cfg.SecureCookies(),
 		CSRF:          csrf,
 		Google:        google,
