@@ -14,6 +14,7 @@ See `SPEC.md` for goals, non-goals and acceptance criteria.
 - Test: `go test ./...` (needs `TEST_DATABASE_URL`, a separate PostgreSQL database; never point it at the development database)
 - Coverage: `go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out`. This only reports numbers; the gate (100% of `internal/service`, 80% overall) is enforced in CI.
 - Sign in with Google (optional; without it the button is hidden): in the Google Cloud console create a project, set up the OAuth consent screen as External and leave it in Testing with your own address as a test user, then create an OAuth client ID of type "Web application" with the authorized redirect URI `http://localhost:3000/auth/google/callback` (`PUBLIC_BASE_URL` + `/auth/google/callback`; add the deployed URL too). Put the client id and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`, reload `.env` and restart the server; it logs "sign in with google is on". Google signs in only an existing account: its email must match and be verified by Google, and after the first sign-in the Google account id decides. Run `go run ./cmd/migrate up` first (migration 000005 adds `users.google_id`).
+- Smart search (optional; without it the search box is hidden): put an API key from console.anthropic.com in `.env` as `ANTHROPIC_API_KEY`, reload `.env` and restart the server; it logs "smart search is on" with the model. `MODEL_NAME` defaults to `claude-haiku-5-5`. Each search is one short request (a fraction of a cent on Haiku 5.5); the tests never call the API.
 - MCP: the tools are served by the app itself at `/mcp` (Streamable HTTP), so `go run ./cmd/server` is all it takes. A client signs in with `Authorization: Bearer <token>`; get a token with `go run ./cmd/mcptoken -email <account>` (asks for the password; prints only the token, so `MCP_TOKEN=$(go run ./cmd/mcptoken -email …)` works). Claude Code (CLI and VS Code extension) connects through `.mcp.json`, and VS Code's own MCP client through `.vscode/mcp.json`; both read `${MCP_TOKEN}` from the environment and hold no secret. The extension only sees variables set before VS Code started, so on Windows store the token with `[Environment]::SetEnvironmentVariable("MCP_TOKEN", $t, "User")` and restart VS Code; tokens last 7 days. With the CLI installed, `claude mcp add --transport http labwiz http://localhost:3000/mcp --header "Authorization: Bearer $MCP_TOKEN"` works too. MCP Inspector: `npx @modelcontextprotocol/inspector`, transport Streamable HTTP, the same URL and header.
 
 ## Conventions
@@ -22,7 +23,7 @@ See `SPEC.md` for goals, non-goals and acceptance criteria.
   - `internal/handler/` holds Chi route handlers.
   - `internal/service/` holds business rules.
   - `internal/store/` holds the data layer and is the only place that writes SQL.
-  - `internal/model/` holds the one file that names the AI provider.
+  - `internal/model/` holds the one file that names the AI provider (`anthropic.go`).
   - `internal/auth/` holds sessions, bcrypt, CSRF tokens and the Google OAuth client (`google.go`); the Google routes are in `internal/handler/google.go` and the linking rules in `Auth.GoogleSignIn`.
   - `internal/mcpserver/` holds the MCP tools, served at `/mcp`; `cmd/mcptoken/` prints a token for an MCP client. `mcp-server/` is the Exercise 1 coursework, not part of the app.
   - `migrations/` holds the numbered SQL files.
@@ -52,12 +53,12 @@ rules and knows nothing about HTTP or about MCP. Only the data layer writes SQL.
 that talks to the database directly is a second, unguarded way into your data: never add one.
 
 ## The model feature
-<!-- Provider, env var, and the call site. -->
-- The provider is named in exactly one file: 
+- The provider is named in exactly one file: `internal/model/anthropic.go` (the Anthropic Go SDK, `claude-haiku-5-5` by default). The service sees it only as `service.SearchModel`; `cmd/server` wires it in when `ANTHROPIC_API_KEY` is set. The call site is `Labs.SmartSearch` in `internal/service/search.go`, reached from `GET /labs?q=` in `internal/handler/search.go`.
+- The model gets only the query (in `<query>` tags, as data), today's date and the timezone: never user, email or booking data. It has one forced, strict tool, `set_filters`, so the worst a prompt injection can do is a wrong filter.
 - The key comes from an environment variable and is never committed or logged.
-- Every call has a timeout and a deterministic fallback, so the app still works when the provider is down or rate-limited.
-- The model's output is re-checked against real data before anything is saved or shown.
-- Tests never call the provider: they pass in a fake client.
+- Every call has a timeout and a deterministic fallback, so the app still works when the provider is down or rate-limited: 5 seconds in all, one retry on a 429 only when its `retry-after` fits, 10 searches per user per minute, and every failure shows today's unfiltered list with "Smart search is unavailable, showing all labs."
+- The model's output is re-checked against real data before anything is saved or shown: `SmartSearch` decodes it strictly (no unknown fields, whole numbers, real dates, not in the past, at most 31 days) and discards anything else. A search never writes to the database.
+- Tests never call the provider: they pass in a fake client (a fake `SearchModel`, or the real client pointed at an `httptest` fake API).
 
 ## The MCP server
 <!-- Where it lives and how it authenticates. -->

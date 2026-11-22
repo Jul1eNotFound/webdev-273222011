@@ -45,8 +45,14 @@ func filterTool() anthropic.ToolParam {
 	nullable := func(t string, desc string) map[string]any {
 		return map[string]any{"type": []string{t, "null"}, "description": desc}
 	}
-	timeOfDay := nullable("string", "When the session starts: morning (before 12:00), afternoon (12:00-17:00) or evening (from 17:00). Null if the query does not say.")
-	timeOfDay["enum"] = []any{"morning", "afternoon", "evening", nil}
+	// An enum cannot sit on a ["string", "null"] type (the API answers 400), so null is a second choice.
+	timeOfDay := map[string]any{
+		"anyOf": []any{
+			map[string]any{"type": "string", "enum": []string{"morning", "afternoon", "evening"}},
+			map[string]any{"type": "null"},
+		},
+		"description": "When the session starts: morning (before 12:00), afternoon (12:00-17:00) or evening (from 17:00). Null if the query does not say.",
+	}
 	keywords := nullable("array", "Up to 5 single words the lab's title or description should contain, such as a subject. Null if none.")
 	keywords["items"] = map[string]any{"type": "string"}
 	return anthropic.ToolParam{

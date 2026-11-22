@@ -232,3 +232,39 @@ func TestNewAnthropicUsesTheGivenModel(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// The real API refuses a schema whose enum sits on a combined type such as ["string", "null"] (400
+// "Enum value 'morning' does not match declared type"); the fake API above does not check schemas, so
+// this does. Found in the hand check.
+func TestFilterToolSchemaHasNoEnumOnACombinedType(t *testing.T) {
+	var walk func(path string, v any)
+	walk = func(path string, v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			if _, hasEnum := x["enum"]; hasEnum {
+				if _, single := x["type"].(string); !single {
+					t.Errorf("%s: enum with type %v", path, x["type"])
+				}
+			}
+			for k, child := range x {
+				walk(path+"."+k, child)
+			}
+		case []any:
+			for i, child := range x {
+				walk(path+"["+string(rune('0'+i))+"]", child)
+			}
+		}
+	}
+	b, err := json.Marshal(filterTool().InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema any
+	if err := json.Unmarshal(b, &schema); err != nil {
+		t.Fatal(err)
+	}
+	walk("input_schema", schema)
+	if !strings.Contains(string(b), `"anyOf":[{"enum":["morning","afternoon","evening"],"type":"string"},{"type":"null"}]`) {
+		t.Errorf("time_of_day = %s", b)
+	}
+}
