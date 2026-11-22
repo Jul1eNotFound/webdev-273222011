@@ -158,3 +158,35 @@ func TestDemoHasACancelledSessionThatKeptItsBooking_AC73(t *testing.T) {
 		t.Errorf("Soldering practice: %d cancelled of %d sessions, %d kept bookings; want 1 of 1 with 1", cancelled, sessions, booked)
 	}
 }
+
+// TestDemoCoversTheSmartSearchCases checks what trying smart search by hand relies on: in the default
+// seven days there are morning, afternoon and evening sessions (Slice 7), sessions outside them, and the
+// main student has future bookings to cancel.
+func TestDemoCoversTheSmartSearchCases(t *testing.T) {
+	pool := storetest.Open(t)
+	st := store.New(pool)
+	seedAll(t, st)
+	ctx := context.Background()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	var morning, afternoon, evening, later, mine int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FILTER (WHERE extract(hour FROM starts_at AT TIME ZONE 'UTC') < 12),
+		       count(*) FILTER (WHERE extract(hour FROM starts_at AT TIME ZONE 'UTC') BETWEEN 12 AND 16),
+		       count(*) FILTER (WHERE extract(hour FROM starts_at AT TIME ZONE 'UTC') >= 17)
+		FROM lab_sessions WHERE starts_at >= $1 AND starts_at < $2 AND cancelled_at IS NULL`,
+		today.AddDate(0, 0, 1), today.AddDate(0, 0, 7)).Scan(&morning, &afternoon, &evening); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM lab_sessions WHERE starts_at >= $1`, today.AddDate(0, 0, 7)).Scan(&later); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*) FROM bookings b JOIN users u ON u.id = b.user_id JOIN lab_sessions s ON s.id = b.session_id
+		WHERE u.email = $1 AND s.starts_at > $2`, seed.StudentEmail, now).Scan(&mine); err != nil {
+		t.Fatal(err)
+	}
+	if morning < 3 || afternoon < 3 || evening < 3 || later < 2 || mine != 2 {
+		t.Errorf("next week: %d morning, %d afternoon, %d evening; %d later; the student has %d future bookings",
+			morning, afternoon, evening, later, mine)
+	}
+}

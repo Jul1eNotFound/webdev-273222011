@@ -85,6 +85,30 @@ func demoLabs(now time.Time, loc *time.Location) []demoLab {
 		lab(omar, "Machine learning lab", "Train a small image classifier on the lab GPUs.", at(7, 14), at(7, 17), 20),
 		lab(dana, "Water quality testing", "Test river samples for pH and nitrates.", at(-1, 9), at(-1, 12), 6,
 			"diego@labwiz.test"), // already over
+
+		// For smart search (Slice 7): every day of the next week has morning, afternoon or evening
+		// sessions, subjects that work as keywords, full and nearly full sessions, a cancelled one, and
+		// labs outside the default seven days.
+		lab(omar, "Circuit design", "Electronics: build breadboard circuits with resistors and LEDs.", at(1, 8), at(1, 10), 10,
+			"ana@labwiz.test", "ben@labwiz.test"), // tomorrow morning
+		lab(dana, "Microbiology cultures", "Biology: grow and stain bacterial cultures.", at(1, 16), at(1, 18), 2,
+			"chen@labwiz.test", "diego@labwiz.test"), // tomorrow afternoon, full
+		lab(dana, "Quiet study lab", "A quiet room with microscopes for independent work.", at(1, 18), at(1, 20), 6), // tomorrow evening
+		lab(omar, "Python for scientists", "Programming: analyse lab data with Python.", at(2, 14), at(2, 16), 15,
+			StudentEmail, "eva@labwiz.test"), // in two days, afternoon; the main student booked it
+		lab(dana, "Night sky photography", "Astronomy: photograph the Moon and planets through the telescope.", at(2, 19), at(2, 22), 7,
+			"ana@labwiz.test", "ben@labwiz.test", "chen@labwiz.test", "diego@labwiz.test", "eva@labwiz.test", "farah@labwiz.test"), // evening, one place left
+		lab(omar, "Chemistry safety induction", "Chemistry: required before any wet lab.", at(3, 9), at(3, 10), 30), // morning, many places
+		lab(omar, "Robot arm programming", "Robotics: program a six-axis robot arm.", at(3, 15), at(3, 17), 4,
+			"farah@labwiz.test", "ana@labwiz.test"), // afternoon, two places left
+		lab(dana, "Analytical chemistry", "Chemistry: titration and chromatography.", at(4, 11), at(4, 13), 10),
+		cancel(lab(dana, "Laser optics", "Physics: lenses, lasers and interference.", at(4, 14), at(4, 16), 6,
+			"ben@labwiz.test")), // cancelled later this week, with Ben's booking kept
+		lab(omar, "Electronics repair café", "Electronics: fix broken gadgets together.", at(5, 17), at(5, 20), 12), // evening
+		lab(dana, "Biology field walk", "Biology: sample plants and water by the river.", at(6, 9), at(6, 12), 15,
+			StudentEmail), // the last day of the default week, morning
+		lab(dana, "Physics olympiad prep", "Physics: practise olympiad problems in small groups.", at(10, 16), at(10, 18), 10), // past the first week
+		lab(omar, "Genetics lab", "Biology: extract DNA from strawberries.", at(20, 10), at(20, 12), 12),                       // in three weeks
 	}
 }
 
@@ -111,6 +135,11 @@ func Demo(ctx context.Context, st *store.Store, now time.Time, loc *time.Locatio
 			return err
 		}
 		ids[a.Email] = u.ID
+	}
+	// The main student, made by Run, books a few future sessions when it exists, so cancelling can be
+	// tried from that account too.
+	if u, err := st.UserByEmail(ctx, StudentEmail); err == nil {
+		ids[StudentEmail] = u.ID
 	}
 	skipTaken := func(s store.SessionView, mine bool) error {
 		if mine || s.Booked >= s.PlaceLimit || s.CancelledAt != nil {
@@ -140,6 +169,9 @@ func Demo(ctx context.Context, st *store.Store, now time.Time, loc *time.Locatio
 		}
 		for _, email := range d.bookers {
 			userID, ok := ids[email]
+			if !ok && email == StudentEmail {
+				continue // Run has not made the main student
+			}
 			if !ok {
 				return fmt.Errorf("demo lab %q is booked by unknown account %s", d.lab.Title, email)
 			}
