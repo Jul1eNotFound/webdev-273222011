@@ -52,3 +52,10 @@ Checkpoints: plan review before any code, a permission prompt for everything in 
 - Checkpoints: plan approval (refuse unknown addresses; I create the OAuth client); a commit per step; state check and verified check broken on purpose; hand check with a real Google client (link, re-sign-in, cancel, changed email)
 - Went wrong: the dev database needed migration 000005 before anyone could sign in; a test used a package name as a type; heredoc quoting again
 - Changed by hand: created the Google OAuth client and put its id and secret in .env; renamed a demo account to my Gmail for the check
+
+## 2026-11-22 · Slice 7: smart search
+- Goal: a free-text search on /labs that Claude Haiku 5.5 turns into filters, shown as editable chips, with a fallback whenever the model can't answer
+- Delegated: the service rules (filters, strict checking of the model's answer, 10 searches a minute), internal/model/anthropic.go with the Anthropic Go SDK (v2.7.0, older than the newest days-old releases), the search box and chips, tests against a fake model and a fake API, AGENTS.md, SPEC.md; afterwards more demo labs to test with
+- Checkpoints: plan approval (I chose: no date means the next 7 days, hide the box without a key, a hand check with a real key); a commit per step; break-on-purpose checks (no length check, unknown fields accepted, no rate limit, waiting past the deadline for retry-after, a search that writes); hand check with the real API, by keyboard and at 375 px
+- Went wrong: every real search fell back at first, because the API refused the tool schema (an enum on a "string or null" type) and the fake API in the tests never checks schemas; fixed with anyOf and a test of the schema shape. The first search after a restart can still hit the 5 second deadline. The SDK sends the key as a bearer token, not X-Api-Key, as a test assumed; one test expected the wrong number of free places; a coverage gap came from an unreachable check
+- Changed by hand: added ANTHROPIC_API_KEY to .env; reported the failing search; asked for more demo labs to test every case
