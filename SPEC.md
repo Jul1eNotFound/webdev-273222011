@@ -34,9 +34,8 @@ lab booking
 
 ## Auth
 - Local: e-mail and password, stored as a bcrypt hash.
-- Provider: Sign in with Google, the authorization-code flow, on the server.
-- Linking: matched on Google's account id. An address Google has not marked as verified is
-  never linked to an existing account.
+- Provider: Sign in with Google, the authorization-code flow with PKCE, on the server (`/auth/google` and its callback). Shown only when `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set.
+- Linking: matched on Google's account id (`users.google_id`). On the first Google sign-in, the account with the same email is linked, but only when Google has marked that address as verified; an unverified address is never linked to an existing account. After that the id alone decides, and the stored email is not changed. An address that matches no account is refused (accounts are seeded; there is no sign-up), and so is an account already linked to another Google account.
 - Forms: every form that changes something carries a CSRF token tied to the sign-in session: the HMAC-SHA256 of the session's cookie token under `SESSION_SECRET`, which must be at least 32 characters or the server does not start. The sign-in form is exempt, since there is no session yet.
 - MCP: each tool call carries `Authorization: Bearer <token>`, where the token is an ordinary sign-in session token printed by `go run ./cmd/mcptoken -email <account>` (it asks for the password and signs in through the same `Auth.Login`). It lasts 7 days like any session and grants exactly what that account may do. `/mcp` never reads the session cookie, so it needs no CSRF token.
 
@@ -56,7 +55,7 @@ lab booking
 ## UI
 - Stack: plain HTML, CSS and JavaScript served by the Go backend. There is no framework and no build step. One stylesheet, with spacing, type scale and colours defined as CSS custom properties. Pages are server-rendered, and small scripts handle the booking button and the smart search.
 - Screens:
-  1. **Login** (`/login`): email and password, a "Sign in with <provider>" button, and an error line. Visitors who are not signed in land here from any protected page.
+  1. **Login** (`/login`): email and password, a "Sign in with Google" button when Google is configured, and an error line, which also shows why a Google sign-in failed. Visitors who are not signed in land here from any protected page.
   2. **Lab list** (`/labs`, `/labs?date=YYYY-MM-DD`): the sessions on one day (today by default) as cards, each with lab title, description, owner ("Run by …"), time period and free places. Links to the previous and next day and a labelled date field change the day. A smart-search box with editable filter chips. Each card has a "Book" button, which is disabled and reads "Full" when no places are left, "Closed" once the session has started, "Cancelled" when staff cancelled it, and "Booked" when the student has booked it. The empty state reads "No labs available today", "No labs on this day" for another day, or "No labs match these filters" when search filters are applied.
   3. **Lab detail and my bookings** (`/labs/{id}`, `/bookings`): a lab's details and owner, and its upcoming sessions, each with "Book" or "Cancel booking". The bookings page lists the student's own bookings, marking those whose session was cancelled as "Cancelled by staff". When a student books a full session, they see "This lab is full" with links back to the lab list and the home page (AC-1).
   4. **Staff: my labs, add lab** (`/staff/labs`, `/staff/labs/new`): the labs the signed-in staff member owns, each with its next session, and a form with title, description and place limit. Students get 403.
@@ -83,9 +82,11 @@ A staff member adds a lab (`POST /staff/labs/new`):
 
 Slice 3a removed the earlier mismatch: `internal/handler/staff.go` used to call `service.RequireStaff` itself. The GET handler now asks `Labs.NewLabForm(caller)`, and `addLab` leaves the role check to `Labs.Add`, so HTTP and MCP refuse a student at the same point.
 
-This section describes the code as it is after Slice 5. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row. Cancelling a session (`Labs.CancelSession` → `CancelSession` in `internal/store/cancel_delete.go`) takes the same lock, so no booking gets in after a cancel. A student cancelling their own booking (`POST /sessions/{id}/cancel-booking` → `Labs.CancelBooking` → `CancelBooking` in `internal/store/my_bookings.go`) takes it too and deletes only the caller’s row, so a booking that waited for it gets the freed place. Deleting a lab is one `DELETE`: its sessions cascade, and the `ON DELETE RESTRICT` key on `bookings.session_id` from `000004_lab_sessions` refuses a lab that has any booking. The database decides, not a prior lookup, so a booking made while the delete runs is never lost. Every request that changes something passes the CSRF check in `require` in `internal/auth/session.go`, after the session and before any handler, so no route can forget it.
+This section describes the code as it is after Slice 6. A new lab has no time period and no sessions: its owner then adds sessions on `/staff/labs/{id}`, which follow the same layers (`addSessions` in `staff.go` → `Labs.AddSessions` in `internal/service/sessions.go` → `AddSessions` in `internal/store/lab_sessions.go`, where the `lab_sessions_no_overlap` exclusion constraint from `migrations/000004_lab_sessions.up.sql` decides an overlap). A booking is made on a session, through `POST /sessions/{id}/book` → `Labs.Book` → `BookSession`, which locks the session's row. Cancelling a session (`Labs.CancelSession` → `CancelSession` in `internal/store/cancel_delete.go`) takes the same lock, so no booking gets in after a cancel. A student cancelling their own booking (`POST /sessions/{id}/cancel-booking` → `Labs.CancelBooking` → `CancelBooking` in `internal/store/my_bookings.go`) takes it too and deletes only the caller’s row, so a booking that waited for it gets the freed place. Deleting a lab is one `DELETE`: its sessions cascade, and the `ON DELETE RESTRICT` key on `bookings.session_id` from `000004_lab_sessions` refuses a lab that has any booking. The database decides, not a prior lookup, so a booking made while the delete runs is never lost. Every request that changes something passes the CSRF check in `require` in `internal/auth/session.go`, after the session and before any handler, so no route can forget it.
 
 An MCP tool call takes the same path from the service down. `POST /mcp` is mounted in `router.go` outside the cookie and CSRF groups and handled by `internal/mcpserver` (the SDK's stateless Streamable HTTP handler, capped at 1 MB). For `book_lab`, `addTool` in `server.go` reads `Authorization: Bearer <token>` and asks `Auth.CurrentUser` for the caller; the tool in `write.go` then calls `Labs.Book`, the same method as `POST /sessions/{id}/book`, and returns `service.MsgBooked` with the free places, the fields the booking script gets. A `*service.Error` becomes a tool error with its sentence. The tools never check a role and never reach the store.
+
+A Google sign-in has two GETs outside the session groups, in `internal/handler/google.go`. `/auth/google` makes a state and a PKCE verifier (`auth.NewGoogleState`), keeps them in the `labwiz_google` cookie and redirects to Google with `auth.Google.AuthURL` (`internal/auth/google.go`). The callback clears that cookie, refuses a cancel or a state that does not match, exchanges the code with `Identity`, which checks the id_token's issuer, audience and expiry, and passes the result to `Auth.GoogleSignIn` in `internal/service/auth.go`. The service decides who signs in: `UserByGoogleID`, then the verified-email rule and `LinkGoogle` in `internal/store/users.go`, whose `UPDATE … WHERE google_id IS NULL` and the unique `users.google_id` from `migrations/000005_google_ids.up.sql` decide a race. A session is made by the same `startSession` as the password form; every refusal redirects to `/login?google=<code>`.
 
 ## Decisions
 How the criteria are written:
@@ -314,6 +315,10 @@ MCP (Slice 5):
 | AC-92 | `TestAC92_DB_ScheduleSessionAddsTheSameRowsAsTheWebPage`, `TestAC92_ScheduleSessionAddsAndRefusesLikeTheWebPage` |
 | AC-93 | `TestAC93_CancelSessionKeepsItsBookings`, `TestAC93_DB_CancelSessionKeepsItsBookingsLikeTheWebPage` |
 | AC-94 | `TestAC94_DB_OnlyTheOwnerSchedulesAndCancels`, `TestAC94_OnlyTheOwnerSchedulesAndCancelsSessions` |
+| AC-20 | `TestAC20_DB_FirstGoogleSignInAttachesTheIDToTheSameRow`, `TestAC20_DB_LinkGoogleLinksOnceAndOneAccountToOneUser`, `TestAC20_GoogleSignInLinksTheAccountAndLandsOnLabs`, `TestGoogleIdentityReadsTheIDToken_AC20`, `TestGoogleSignInLinksAVerifiedEmailToTheAccount_AC20` |
+| AC-52 | `TestAC52_DB_UnverifiedEmailAttachesNothing`, `TestAC52_UnverifiedGoogleEmailIsRefusedWithASentence`, `TestGoogleIdentityReadsAnUnverifiedEmail_AC52`, `TestGoogleSignInWithAnUnverifiedEmailIsRefused_AC52` |
+| AC-53 | `TestAC53_DB_ChangedEmailUsesTheSameRow`, `TestAC53_DB_MigrationAddsGoogleIDsAndKeepsUsers`, `TestAC53_LinkedGoogleAccountWithAChangedEmailSignsInTheSameUser`, `TestGoogleSignInOfALinkedAccountWithAChangedEmail_AC53` |
+| AC-54 | `TestAC54_CancelledGoogleSignInLandsOnLoginWithoutASession`, `TestAC54_DB_CancelledOrForgedCallbackCreatesNoSession`, `TestAC54_WrongOrMissingStateIsRefused`, `TestGoogleAuthURLAsksForOpenIDWithPKCE_AC54`, `TestGoogleStateCookieIsShortLivedAndClearedOnTheCallback_AC54`, `TestGoogleStateCookieRoundTrip_AC54` |
 | AC-90 | `TestAC90_DB_AStaffCancelShowsOnTheStudentsBookings`, `TestAC90_MyBookingsShowsTitleTimeAndCancelledByStaff`, `TestAC90_NoBookingsYetSaysSo`, `TestBookingsOfAndSessionsBookedByAreTheUsersOwn_AC89_AC90`, `TestMyBookingsListsOwnBookingsAndMarksCancelled_AC90`, `TestMyBookingsPastAreMostRecentFirst_AC90` |
 
 ## Spec vs result
@@ -585,3 +590,33 @@ What changed in this spec because of it:
 - The Auth section says how an MCP caller signs in.
 - The Decisions section has an MCP part.
 - The Architecture section traces a tool call.
+
+### Slice 6 (checked 2026-11-22)
+Checked with `go vet ./...` and `go test ./...` against the in-memory store and a real `labwiz_test` database (no test skipped), `go test -race` on the Google tests, by breaking the code on purpose three times, by migrating the development database to 000005, and by hand in the browser with a real Google OAuth client in Testing mode. Service coverage stays at 100%.
+
+| Criterion | Result | Notes |
+| --- | --- | --- |
+| AC-20 | Passed | A verified Google address that matches an account links it: the number of `users` rows stays the same, `google_id` is set, one session is made and the browser lands on `/labs`. Checked by hand with a demo account renamed to a real Gmail address. |
+| AC-52 | Passed | An unverified address is refused with "Google has not verified this email address, so it cannot be used to sign in."; `google_id` stays NULL and no session is made. Linking without the verified check made the service, HTTP and DB tests fail. |
+| AC-53 | Passed | A linked Google account signs in the same row after its email changes, and the stored email is not touched; checked by hand by renaming the account in the database. |
+| AC-54 | Passed | A cancel on Google's screen, a wrong or missing state, the right state from another browser, and a reused state all land on `/login` with one sentence, no exchange with Google and no session. Skipping the state check made the HTTP and DB tests fail. Checked by hand by pressing Cancel on Google's screen. |
+| AC-17 | Unchanged | The password form and its sentence are as before; Google's sentences are separate. |
+
+Decisions taken while building it:
+- A verified address that matches no account is refused ("No Labwiz account uses this Google address. Ask staff to add you."): accounts stay seeded, so there is no sign-up, no guessed role and no account without a password.
+- An account already linked to another Google account is refused; a Labwiz account links to one Google account and the link is never replaced.
+- After the first sign-in the Google account id decides, and the stored email is not changed: it is still the address for the password form.
+- The id_token's signature is not checked. It comes straight from Google's token endpoint over TLS, in exchange for the client secret and the PKCE verifier, which OpenID Connect Core 3.1.3.7 accepts in place of a signature; issuer, audience and expiry are checked.
+- The state and the PKCE verifier live in a 10-minute HttpOnly, SameSite=Lax cookie on `/auth/google`, cleared on every callback, so each state works once and only in the browser that started the sign-in. Both routes are GETs outside the session groups, so they need no CSRF token.
+- Failures redirect to `/login?google=<code>`, and the page shows only fixed sentences for known codes, so no text from the URL is reflected.
+- Without `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` the button is hidden and both routes are 404.
+- The Google endpoints are written out, so `golang.org/x/oauth2` is enough without its cloud packages.
+
+What went wrong:
+- Every user query now reads `google_id`, so a development database that has not run migration 000005 cannot sign anyone in. AGENTS.md says to migrate first.
+- The service test file first used the package name `servicetest` as a type, and a shell heredoc broke on quoting again; both were fixed before anything was committed.
+
+What changed in this spec because of it:
+- The Auth section says how linking and refusals work.
+- The login screen names the Google button and when it is shown.
+- The Architecture section traces a Google sign-in.
