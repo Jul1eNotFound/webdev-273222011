@@ -1,4 +1,54 @@
 {{define "content"}}
+{{if .SearchEnabled}}
+<form method="get" action="/labs" class="search" role="search">
+  <label for="q">Smart search</label>
+  <div class="search__row">
+    <input id="q" name="q" type="search" maxlength="200" value="{{.SearchQuery}}" placeholder="e.g. an afternoon lab tomorrow with 3 free places">
+    <button type="submit" class="button">Search</button>
+  </div>
+</form>
+{{end}}
+{{with .Notice}}<p class="message" role="status">{{.}}</p>{{end}}
+{{with .Error}}<p class="message message--error" role="alert">{{.}}</p>{{end}}
+{{with .Filtered}}
+<h1>Search results</h1>
+<form method="get" action="/labs" class="chips">
+  <fieldset>
+    <legend>Applied filters</legend>
+    <div class="chip">
+      <label for="from">From</label>
+      <input id="from" name="from" type="date" value="{{.From}}">
+      <label for="to">To</label>
+      <input id="to" name="to" type="date" value="{{.To}}">
+      <a href="{{.Remove.dates}}">Remove dates</a>
+    </div>
+    <div class="chip">
+      <label for="time">Time of day</label>
+      <select id="time" name="time">
+        <option value=""{{if eq .Time ""}} selected{{end}}>Any time</option>
+        <option value="morning"{{if eq .Time "morning"}} selected{{end}}>Morning</option>
+        <option value="afternoon"{{if eq .Time "afternoon"}} selected{{end}}>Afternoon</option>
+        <option value="evening"{{if eq .Time "evening"}} selected{{end}}>Evening</option>
+      </select>
+      {{with .Remove.time}}<a href="{{.}}">Remove time of day</a>{{end}}
+    </div>
+    <div class="chip">
+      <label for="min">At least this many free places</label>
+      <input id="min" name="min" type="number" min="1" inputmode="numeric" value="{{.Min}}">
+      {{with .Remove.min}}<a href="{{.}}">Remove free places</a>{{end}}
+    </div>
+    <div class="chip">
+      <label for="kw">Keywords, separated by commas</label>
+      <input id="kw" name="kw" type="text" value="{{.Kw}}">
+      {{with .Remove.kw}}<a href="{{.}}">Remove keywords</a>{{end}}
+    </div>
+  </fieldset>
+  <p class="chips__actions">
+    <button type="submit" class="button button--secondary">Apply filters</button>
+    <a href="/labs">Clear filters</a>
+  </p>
+</form>
+{{end}}
 {{with .Day}}
 <h1>{{if .Today}}Labs available today{{else}}Labs on {{longDay .Day}}{{end}}</h1>
 <nav class="day-nav" aria-label="Choose a day">
@@ -21,11 +71,13 @@
   <li class="lab-list__item" data-session="{{.SessionID}}">
     <h2 class="lab-card__title" id="session-{{.SessionID}}-title"><a href="{{if eq .OwnerID $.User.ID}}/staff/labs/{{.LabID}}{{else}}/labs/{{.LabID}}{{end}}">{{.Title}}</a></h2>
     {{with .Description}}<p class="lab-card__description">{{.}}</p>{{end}}
-    <p class="lab-meta"><span class="lab-card__period">{{period .StartsAt .EndsAt}}</span> · {{template "freePlaces" .}} · {{template "owner" .}}</p>
+    <p class="lab-meta">{{if $.Filtered}}<span class="lab-card__day">{{day .StartsAt}}</span>, {{end}}<span class="lab-card__period">{{period .StartsAt .EndsAt}}</span> · {{template "freePlaces" .}} · {{template "owner" .}}</p>
     {{if not $.User.IsStaff}}{{template "bookForm" (bookArgs . $.CSRF)}}{{end}}
   </li>
   {{end}}
 </ul>
+{{else if .Filtered}}
+<p class="empty">No labs match these filters</p>
 {{else if .Day.Today}}
 <p class="empty">No labs available today</p>
 {{else}}

@@ -27,6 +27,13 @@ type pageData struct {
 	Error   string
 	Success string
 	Email   string
+	// Notice is a neutral message, such as smart search falling back (AC-27).
+	Notice string
+	// SearchEnabled shows the smart search box; SearchQuery is what was typed (Slice 7).
+	SearchEnabled bool
+	SearchQuery   string
+	// Filtered is the chips form when the list is a search result (AC-55).
+	Filtered *filterView
 	// GoogleEnabled shows "Sign in with Google" on the sign-in page (Slice 6).
 	GoogleEnabled bool
 	// Sessions is the lab list (/labs).
@@ -154,6 +161,8 @@ func statusFor(k service.Kind) int {
 		return http.StatusNotFound
 	case service.KindConflict:
 		return http.StatusConflict
+	case service.KindUnavailable:
+		return http.StatusServiceUnavailable
 	}
 	return http.StatusInternalServerError
 }
